@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-use crate::definition_core::{aspect_id, card_type_ids, AspectId};
+use crate::definition_core::{aspect_id, card_type_ids, decode_definition, AspectId, CardDefinition};
 use crate::packed::{pack_recipe, RECIPE_ID_MASK, RECIPE_TYPE_OR_CATEGORY_MASK};
 
 // ---------- Recipes ----------
@@ -443,6 +443,251 @@ pub fn recipes_of_type(rt: RecipeType) -> Result<Vec<&'static RecipeDef>, String
     return Ok(Vec::new());
   };
   Ok(ids.iter().filter_map(|id| registry.by_id.get(id)).collect())
+}
+
+/// Detailed result of a successful stack-recipe match: which recipe,
+/// where the actor slot window aligned in the chain, and which optional
+/// fields the recipe carried. Used by clients that need to know
+/// alignment to call the `propose_action` reducer with the correct
+/// `slots` slice and root/hex args.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "js", derive(serde::Serialize))]
+#[cfg_attr(feature = "js", serde(rename_all = "camelCase"))]
+pub struct StackMatch {
+  /// Stable packed id of the matched recipe. Same value the simple
+  /// `match_stack_recipe` returns.
+  pub recipe_index: u16,
+  /// Index into the full chain (`[root] ++ slot_defs`) where the
+  /// recipe's slot window starts. `0` means the actor binds to the
+  /// chain root; `1` means the recipe.root tier consumed `chain[0]`
+  /// (or the matcher's sliding picked a later position).
+  pub slot_start: u32,
+  /// Number of cards in the recipe's slot window
+  /// (= `recipe.slots.len()`). The chain slice
+  /// `chain[slot_start..slot_start + slot_count]` is what fills the
+  /// recipe's slot list.
+  pub slot_count: u32,
+  /// Whether the matched recipe carries a `root` constraint. Drives
+  /// what the client passes for the `propose_action` `root` arg
+  /// (`chain[0]` if `true`, `0` if `false` so the server's flag
+  /// machinery treats the action as free-floating).
+  pub has_root: bool,
+  /// Whether the matched recipe carries a `hex` constraint. Mirrors
+  /// `has_root` for the `hex` arg.
+  pub has_hex: bool,
+}
+
+/// Find the highest-priority `Stack(direction)` recipe whose conditions
+/// are satisfied by the given chain, and return its packed id. Returns
+/// `Ok(0)` when no recipe matches (`0` is unreachable as a real packed
+/// id — `recipes/id.json` rejects raw id `0`).
+///
+/// Inputs are `u16` `packed_definition`s (see
+/// [`crate::definition_core::decode_definition`]). Pass `0` for
+/// `hex_def` when the chain isn't anchored to a hex; pass `0` for
+/// `root_def` if the caller has no chain root to bind separately from
+/// the slot list. The full chain considered for matching is
+/// `[root_def] ++ slot_defs` (root first, then the cards stacked
+/// outward in `direction`).
+///
+/// # Eligibility & actor sliding
+///
+/// A recipe is eligible iff every condition it declares is satisfied:
+/// - if `recipe.hex` is `Some`, the def at `hex_def` must satisfy it;
+/// - if `recipe.root` is `Some`, the def at `root_def` (= `chain[0]`)
+///   must satisfy it;
+/// - the recipe's `slots` window can be aligned at some start index
+///   `s` along the chain such that `chain[s + i]` satisfies
+///   `recipe.slots[i]` for every `i`. The minimum `s` is `1` when
+///   `recipe.root` is set (the root tier is consumed separately) and
+///   `0` otherwise (the actor — `slots[0]` — may bind to the root
+///   itself). The maximum `s` is `chain.len() - recipe.slots.len()`.
+///
+/// When several start positions match, the highest slot-specificity
+/// sum wins for that recipe.
+///
+/// # Ranking
+///
+/// Highest-first lexicographic tuple:
+/// 1. Hex leaf specificity
+/// 2. Root leaf specificity
+/// 3. Best slot leaf-specificity sum across actor-window positions
+///
+/// Leaf weights: `Card` 4, `Aspect` 3, `Type` 2, `Any` 1; an absent
+/// recipe field contributes 0. `And` sums its children's satisfied
+/// weights; `Or` / `WeightedOr` take the higher of the two branches
+/// (`WeightedOr` weights only steer product selection at completion
+/// time, never the match score).
+///
+/// Tiebreak across recipes with identical scores: the lower packed
+/// stable id wins (= earlier declaration order in the recipe JSON).
+pub fn match_stack_recipe(
+  hex_def: u16,
+  root_def: u16,
+  slot_defs: &[u16],
+  direction: StackDirection,
+) -> Result<u16, String> {
+  Ok(
+    match_stack_recipe_detail(hex_def, root_def, slot_defs, direction)?
+      .map(|m| m.recipe_index)
+      .unwrap_or(0),
+  )
+}
+
+/// Same eligibility / ranking as [`match_stack_recipe`], but also
+/// returns *where* the actor slot window aligned in the chain and
+/// whether the matched recipe carries `root` / `hex` constraints. See
+/// [`StackMatch`] for the field semantics. Returns `Ok(None)` when no
+/// recipe matched.
+pub fn match_stack_recipe_detail(
+  hex_def: u16,
+  root_def: u16,
+  slot_defs: &[u16],
+  direction: StackDirection,
+) -> Result<Option<StackMatch>, String> {
+  let candidates = recipes_of_type(RecipeType::Stack(direction))?;
+
+  let hex_card = decode_definition(hex_def)?;
+  let root_card = decode_definition(root_def)?;
+  let slot_cards: Vec<Option<&CardDefinition>> = slot_defs
+    .iter()
+    .map(|&d| decode_definition(d))
+    .collect::<Result<_, _>>()?;
+
+  // Full chain: chain[0] = root, chain[1..] = stacked cards in
+  // direction order. The actor's slot window walks across this.
+  let chain: Vec<Option<&CardDefinition>> = std::iter::once(root_card)
+    .chain(slot_cards.iter().copied())
+    .collect();
+
+  let mut best: Option<((u32, u32, u32), StackMatch)> = None;
+
+  'recipes: for recipe in candidates {
+    let hex_spec = match &recipe.hex {
+      None => 0,
+      Some(e) => {
+        let Some(def) = hex_card else { continue 'recipes };
+        let s = entity_specificity(e, def);
+        if s == 0 {
+          continue 'recipes;
+        }
+        s
+      }
+    };
+
+    let root_spec = match &recipe.root {
+      None => 0,
+      Some(e) => {
+        let Some(def) = root_card else { continue 'recipes };
+        let s = entity_specificity(e, def);
+        if s == 0 {
+          continue 'recipes;
+        }
+        s
+      }
+    };
+
+    // Actor slot window: when `recipe.root` is set, the root tier is
+    // consumed at chain[0], so the actor (slots[0]) can start no
+    // earlier than chain[1]. When unset, the actor may bind to the
+    // root itself (chain[0]) and the window slides outward from there.
+    let min_start: usize = if recipe.root.is_some() { 1 } else { 0 };
+    if chain.len() < min_start + recipe.slots.len() {
+      continue 'recipes;
+    }
+    let max_start: usize = chain.len() - recipe.slots.len();
+
+    let mut best_for_recipe: Option<(u32, u32)> = None; // (slot_spec, start)
+    for start in min_start..=max_start {
+      let mut spec_sum: u32 = 0;
+      let mut ok = true;
+      for (i, slot_entity) in recipe.slots.iter().enumerate() {
+        let Some(def) = chain[start + i] else {
+          ok = false;
+          break;
+        };
+        let s = entity_specificity(slot_entity, def);
+        if s == 0 {
+          ok = false;
+          break;
+        }
+        spec_sum += s;
+      }
+      if ok {
+        best_for_recipe = Some(match best_for_recipe {
+          None => (spec_sum, start as u32),
+          Some((b, _)) if spec_sum > b => (spec_sum, start as u32),
+          Some(prev) => prev,
+        });
+      }
+    }
+
+    let Some((slot_spec, slot_start)) = best_for_recipe else {
+      continue 'recipes;
+    };
+
+    let score = (hex_spec, root_spec, slot_spec);
+    if best.as_ref().map_or(true, |(b, _)| score > *b) {
+      best = Some((
+        score,
+        StackMatch {
+          recipe_index: recipe.index,
+          slot_start,
+          slot_count: recipe.slots.len() as u32,
+          has_root: recipe.root.is_some(),
+          has_hex: recipe.hex.is_some(),
+        },
+      ));
+    }
+  }
+
+  Ok(best.map(|(_, m)| m))
+}
+
+/// Score how well a single entity matches a card definition; 0 means
+/// no match. See [`match_stack_recipe`] for weight conventions.
+fn entity_specificity(entity: &Entity, def: &CardDefinition) -> u32 {
+  match entity {
+    Entity::Card(key) => {
+      if &def.key == key {
+        4
+      } else {
+        0
+      }
+    }
+    Entity::Aspect(aspect, min) => {
+      let val = def
+        .aspects
+        .iter()
+        .find_map(|(a, v)| (a == aspect).then_some(*v))
+        .unwrap_or(0);
+      if val >= *min {
+        3
+      } else {
+        0
+      }
+    }
+    Entity::Type(type_id) => {
+      if def.card_type == *type_id {
+        2
+      } else {
+        0
+      }
+    }
+    Entity::Any => 1,
+    Entity::And(a, b) => {
+      let sa = entity_specificity(a, def);
+      let sb = entity_specificity(b, def);
+      if sa > 0 && sb > 0 {
+        sa + sb
+      } else {
+        0
+      }
+    }
+    Entity::Or(a, b) | Entity::WeightedOr { a, b, .. } => {
+      entity_specificity(a, def).max(entity_specificity(b, def))
+    }
+  }
 }
 
 /// Resolve a `RecipeType` variant to its `(type_id, category_id)` pair

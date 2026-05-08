@@ -24,6 +24,7 @@
 pub mod packed;
 pub mod definition_core;
 pub mod recipe_core;
+pub mod flags_core;
 
 #[cfg(feature = "js")]
 mod wasm_api;

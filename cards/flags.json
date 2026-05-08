@@ -9,6 +9,7 @@
     "layer_locked":    { "bit": 2, "description": "Card is locked to its current layer and may not be moved to a different layer." },
     "drop_hold":       { "bit": 3, "description": "**Temporary** drop hold — card is currently mid-drop and must not be re-picked or repositioned until the drop resolves." },
     "drop_locked":     { "bit": 4, "description": "**Permanent** drop lock — card cannot be dropped at all; attempts to drop it must be rejected." },
+    "slot_hold":       { "bit": 5, "description": "**Temporary** slot reservation — set by the server when a recipe match has claimed this card as a slot filler and execution is pending. While set: the card is committed to the in-flight recipe and must not be re-claimed by another match, picked up by the user, or moved by automatic layout. Cleared when the recipe completes, fails, or is cancelled." },
     "dead":            { "bit": 7, "description": "Server has marked this card as dead — typically a recipe consumed it as a reagent. Set via UPDATE (rather than DELETE) so the write carries `valid_at` (the server's unix-seconds 'this happened at' timestamp); the client treats the bit flip as the death event and times its dying animation against `valid_at` instead of receive time. Cards-only — actions and magnetic_actions delete immediately and have no equivalent bit." }
   }
 }
