@@ -1,21 +1,22 @@
 [package]
-name = "respoiler-data"
+name = "resonantdust-content"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Resonant Dust shared data crate — registries and bit-packing helpers consumed by the SpacetimeDB module and the pixijs client."
+description = "Resonant Dust shared content crate — registries and bit-packing helpers consumed by the SpacetimeDB module and the pixijs client."
 
 [lib]
-name = "respoiler_data"
+name = "resonantdust_content"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-# Enable wasm-bindgen-annotated public API for browser consumption via wasm-pack.
-js = ["dep:wasm-bindgen"]
+# Enable wasm-bindgen-annotated public API for browser consumption.
+js = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 wasm-bindgen = { version = "0.2", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }

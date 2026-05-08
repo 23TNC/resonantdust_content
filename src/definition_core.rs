@@ -7,7 +7,7 @@
 //!
 //! # Loading
 //!
-//! Source data lives in `<repo>/data/`:
+//! Source data lives in `<repo>/content/`:
 //!
 //! - `cards/types.json` — registry of `card_type` and `card_category` ids.
 //! - `aspects.json` — grouped aspect catalog. Aspects are 1-indexed in
@@ -36,9 +36,9 @@
 //! # Paths
 //!
 //! Files are embedded with `include_str!` at compile time, relative to this
-//! source file at `data/src/definition_core.rs`. JSON catalogs live one
-//! directory up under `data/cards/`, so paths like `../cards/aspects.json`
-//! resolve to `data/cards/aspects.json`.
+//! source file at `content/src/definition_core.rs`. JSON catalogs live one
+//! directory up under `content/cards/`, so paths like `../cards/aspects.json`
+//! resolve to `content/cards/aspects.json`.
 //!
 //! Adding a new `cards/data/NN.json` file requires appending an entry to
 //! `CARDS_FILES` below.

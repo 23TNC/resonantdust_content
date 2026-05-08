@@ -1,4 +1,4 @@
-//! Recipe registry built from JSON catalogs in `data/recipes/`.
+//! Recipe registry built from JSON catalogs in `content/recipes/`.
 //!
 //! Recipe `id` strings (`"woodcutting"`, etc.) are mapped to stable integer
 //! ids in `recipes/id.json`, then packed alongside `recipe_type` (3 bits)
@@ -1022,7 +1022,7 @@ fn parse_inner_recipe(
 /// [`SetStartFlags`] bitmask struct. Missing key → all-zero default
 /// (set nothing). Each sub-key (`"root"`, `"slot"`, `"hex"`) holds an
 /// array of card-flag names; each name maps to a fixed bit position in
-/// `Card.flags` (see `data/cards/flags.json`). `"dead"` is rejected — it
+/// `Card.flags` (see `content/cards/flags.json`). `"dead"` is rejected — it
 /// cannot be set via `set_start`.
 fn parse_set_start(
   recipe_value: &Value,

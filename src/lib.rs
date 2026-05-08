@@ -1,10 +1,10 @@
-//! Resonant Dust shared data crate.
+//! Resonant Dust shared content crate.
 //!
 //! Embeds the JSON catalogs at compile time and exposes typed registries.
 //! Two consumers:
 //!
 //! - **SpacetimeDB module** — depends on this crate as a path-dep `rlib` and
-//!   re-exports the public API from its own `definitions.rs` shim.
+//!   calls into the public API directly from `resonantdust_content::*`.
 //! - **pixijs client** — consumes the same crate built as a wasm bundle via
 //!   `wasm-pack build --features js --target web`. The `js` feature gates
 //!   `wasm-bindgen` annotations so the SpacetimeDB build doesn't pull in
@@ -16,9 +16,9 @@
 //!                   (`packed_definition`, `packed_recipe`, `valid_at`,
 //!                   `macro_zone`, `micro_zone`, tile rows).
 //! - [`definition_core`] card and aspect registries, built lazily from the
-//!                   JSON catalogs in `data/cards/`.
+//!                   JSON catalogs in `content/cards/`.
 //! - [`recipe_core`]   recipe registry, built lazily from the JSON catalogs
-//!                   in `data/recipes/`. Resolves `"@<type>"` entities and
+//!                   in `content/recipes/`. Resolves `"@<type>"` entities and
 //!                   aspect names through `definition_core`.
 
 pub mod packed;

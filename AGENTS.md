@@ -1,23 +1,25 @@
-# data/
+# content/
 
-Shared game data — JSON files read by **both** the SpacetimeDB server (Rust)
-and the pixijs client (TypeScript). Anything that defines what cards are,
-which recipes exist, or what aspects mean lives here.
+Shared game content — JSON catalogs **and** the Rust crate (`resonantdust-content`)
+that parses them, consumed by both the SpacetimeDB server (Rust) and the
+pixijs client (TypeScript via wasm-pack). Anything that defines what cards
+are, which recipes exist, or what aspects mean lives here.
 
 ## Build pipeline
 
-Two consumers, two delivery mechanisms — both view the same files:
+Two consumers, one source crate:
 
-- **Server**: [`spacetime/compose.yml`](../spacetime/compose.yml) mounts
-  `../data` (this directory) at `/workspace/server/spacetimedb/data` inside
-  the build container. The Rust module embeds files at compile time via
-  `include_str!("../data/...")` — see
-  [`spacetime/server/spacetimedb/src/definitions.rs`](../spacetime/server/spacetimedb/src/definitions.rs).
-  For host-side `cargo` builds (outside the container), create a symlink at
-  `spacetime/server/spacetimedb/data` → `../../../data` so the same paths
-  resolve.
-- **Client**: this directory is symlinked into the pixijs project so the
-  client reads the same JSON at runtime.
+- **Server**: depends on `resonantdust-content` as a Cargo path-dep (see
+  [`spacetime/server/spacetimedb/Cargo.toml`](../spacetime/server/spacetimedb/Cargo.toml)).
+  [`spacetime/compose.yml`](../spacetime/compose.yml) bind-mounts
+  `../content` (this directory) at `/workspace/server/spacetimedb/content`
+  inside the build container so the path-dep resolves. JSON catalogs are
+  embedded at compile time via `include_str!` from inside the crate
+  (`content/src/definition_core.rs`, `content/src/recipe_core.rs`).
+- **Client**: consumes the same crate built as a wasm bundle. `bin/content wasm`
+  runs `wasm-pack build --features js --target web` and emits
+  `content/pkg/resonantdust_content.{js,wasm,d.ts}`. The pixijs symlink at
+  `pixijs/src/content` makes that package importable.
 
 A change to any file here ships to both halves. They MUST agree on schema.
 
@@ -27,7 +29,9 @@ Files are grouped by topic. Each topic directory holds its registries and
 metadata at the top, with bulky definition files in a `data/` subdirectory:
 
 ```
-data/
+content/
+  Cargo.toml       # resonantdust-content crate manifest
+  src/             # parsing + registry code (definition_core, recipe_core)
   cards/
     types.json     # card_type / card_category registry
     aspects.json   # aspect catalog
@@ -82,11 +86,12 @@ data/
   `AspectId` are both 1-indexed; a 0 in either context means "no
   card / no aspect". Don't reorder JSON object keys casually — the
   position determines the id.
-- **Adding a new file requires updating the loader.** The server can't
+- **Adding a new file requires updating the loader.** The crate can't
   glob `include_str!`; each new `cards/data/NN.json` or `recipes/data/NN.json`
-  needs a corresponding tuple appended to `CARDS_FILES` /
-  `RECIPES_FILES` in [`definitions.rs`](../spacetime/server/spacetimedb/src/definitions.rs).
-  Forgetting this is a "my file isn't loading" first-suspect.
+  needs a corresponding tuple appended to `CARDS_FILES` in
+  [`src/definition_core.rs`](src/definition_core.rs) or `RECIPES_FILES` in
+  [`src/recipe_core.rs`](src/recipe_core.rs). Forgetting this is a "my file
+  isn't loading" first-suspect.
 - **Adding cards or recipes requires running `gen-ids.py`.** The
   registry rejects entries that aren't in `cards/id.json` /
   `recipes/id.json` with a clear "run gen-ids.py" error message.
@@ -109,9 +114,11 @@ data/
 
 ## Where parsing lives
 
-- Server: [`spacetime/server/spacetimedb/src/definitions.rs`](../spacetime/server/spacetimedb/src/definitions.rs)
-  — `build_aspects`, `build_cards`, `build_recipes`, `parse_entity`,
-  `parse_duration`, `json_id_map`. All `Result`-returning; failures
-  propagate via the registry's stored error.
-- Client: pixijs project (location varies — check the data/ symlink in
-  pixijs).
+- Crate: [`src/definition_core.rs`](src/definition_core.rs) and
+  [`src/recipe_core.rs`](src/recipe_core.rs) — `build_aspects`, `build_cards`,
+  `build_recipes`, `parse_entity`, `parse_duration`, `json_id_map`. All
+  `Result`-returning; failures propagate via the registry's stored error.
+  Consumed by the spacetimedb crate as a path-dep and by the pixijs client
+  as wasm.
+- Client wrapper: [`pixijs/src/game/definitions/DefinitionManager.ts`](../pixijs/src/game/definitions/DefinitionManager.ts)
+  is the TypeScript facade over the wasm exports.

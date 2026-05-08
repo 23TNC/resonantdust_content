@@ -1,4 +1,4 @@
-# data/recipes/
+# content/recipes/
 
 Recipe data — loaded by both the SpacetimeDB server and the pixijs client.
 
@@ -268,7 +268,7 @@ This dual implementation buys two independent things at once:
   recipe itself and picks the highest-weight winner. The client
   pre-filter is purely *advisory*.
 
-Both sides read the same `data/recipes/data/*.json` and `data/recipes/id.json`,
+Both sides read the same `content/recipes/data/*.json` and `content/recipes/id.json`,
 so the **input** to evaluation is automatically in sync — but the
 **evaluation logic** has to be kept in lockstep manually. When you
 change anything about priority semantics (adding an entity form,
@@ -592,20 +592,21 @@ just expires).
 
 ## Loader
 
-[`definitions.rs`](../../spacetime/server/spacetimedb/src/definitions.rs)
-— `build_recipes`, `parse_entity`, `parse_duration`. Recipe parsing
-pulls `type_ids` from the cards registry to resolve `"@<type>"`
-strings. New files MUST be added to the `RECIPES_FILES` const tuple.
+[`../src/recipe_core.rs`](../src/recipe_core.rs) — `build_recipes`,
+`parse_entity`, `parse_duration`. Recipe parsing pulls `type_ids` from the
+cards registry (via `crate::definition_core::card_type_ids`) to resolve
+`"@<type>"` strings. New files MUST be added to the `RECIPES_FILES` const
+tuple.
 
 ## Adding a new recipe
 
 1. Pick the file (or add a new one).
 2. Append the recipe record. (Order within a file affects priority
    tiebreaks — declare specific recipes before catch-all ones.)
-3. Confirm every aspect name in entities exists in `aspects.json`.
+3. Confirm every aspect name in entities exists in `../cards/aspects.json`.
 4. Confirm every card-type name in `"@<type>"` entities exists in
-   `cards/types.json`.
+   `../cards/types.json`.
 5. Confirm every card key in `output_success` / `output_fail` exists in `../cards/data/*.json`.
-6. Run `python data/gen-ids.py` to assign the new recipe a stable ID
-   in `recipes/id.json`.
-7. If a new file: add it to `RECIPES_FILES` in `definitions.rs`.
+6. Run `bin/content check` (or `python content/gen-ids.py`) to assign the
+   new recipe a stable ID in `recipes/id.json`.
+7. If a new file: add it to `RECIPES_FILES` in `../src/recipe_core.rs`.

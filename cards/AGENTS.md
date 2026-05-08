@@ -1,4 +1,4 @@
-# data/cards/
+# content/cards/
 
 Card data — consumed by both the SpacetimeDB server (Rust) and the pixijs
 client.
@@ -174,10 +174,10 @@ without scanning every bucket.
    longer determines `definition_id`).
 3. Make sure every aspect named in the new card's aspect list exists in
    `aspects.json`. Add it there first if not.
-4. Run `python data/gen-ids.py` to assign the new card a stable
-   `definition_id` in `cards/id.json`.
-5. If it's a new file, add `("cards/data/NN.json", include_str!("../data/cards/data/NN.json"))`
-   to `CARDS_FILES` in [`definitions.rs`](../../spacetime/server/spacetimedb/src/definitions.rs).
+4. Run `bin/content check` (or `python content/gen-ids.py` directly) to
+   assign the new card a stable `definition_id` in `cards/id.json`.
+5. If it's a new file, add `("cards/data/NN.json", include_str!("../cards/data/NN.json"))`
+   to `CARDS_FILES` in [`../src/definition_core.rs`](../src/definition_core.rs).
 
 ## Adding a new card type
 
