@@ -1,0 +1,140 @@
+{
+  "discipline": {
+    "default": {
+      "attack": 1,
+      "work": 2,
+      "study": 3,
+      "build": 4,
+      "survey": 5,
+      "guard": 6,
+      "farm": 7,
+      "trade": 8,
+      "repair": 9,
+      "raid": 10,
+      "scavenge": 11,
+      "sneak": 12,
+      "torch": 13,
+      "swarm": 14,
+      "scheme": 15
+    }
+  },
+  "event": {
+    "default": {
+      "despair": 1,
+      "wandering_beast": 2,
+      "lost_cache": 3,
+      "sudden_rain": 4,
+      "thin_smoke": 5,
+      "nightfall": 6,
+      "clear_sky": 7,
+      "tracks": 8,
+      "distant_cry": 9
+    }
+  },
+  "faculty": {
+    "default": {
+      "corpus": 1,
+      "aether": 2,
+      "sollertia": 3,
+      "anima": 4,
+      "fatigue": 5,
+      "vigor": 6,
+      "mason": 7,
+      "carpenter": 8,
+      "scout": 9,
+      "farmer": 10,
+      "scribe": 11,
+      "soldier": 12,
+      "scrapper": 13,
+      "sneakthief": 14,
+      "mushroom_mind": 15,
+      "bug_biter": 16,
+      "firestarter": 17,
+      "junkwright": 18
+    }
+  },
+  "requisite": {
+    "default": {
+      "log": 1,
+      "branch": 2,
+      "stone_chunk": 3,
+      "flint": 4,
+      "fiber": 5,
+      "mushroom": 6,
+      "berries": 7,
+      "scrap_metal": 8,
+      "charcoal": 9,
+      "plank": 10,
+      "cut_stone": 11,
+      "iron_nails": 12,
+      "bread": 13,
+      "lantern": 14,
+      "ledger": 15,
+      "sharp_stick": 16,
+      "rusty_knife": 17,
+      "stink_bomb": 18,
+      "torch_bundle": 19,
+      "junk_pile": 20,
+      "cave_grub": 21
+    }
+  },
+  "revery": {
+    "default": {
+      "soul": 1,
+      "dread": 2,
+      "remembered_path": 3,
+      "campfire_tale": 4,
+      "omen": 5,
+      "clear_intent": 6,
+      "survey_notes": 7,
+      "work_song": 8,
+      "civic_pride": 9,
+      "old_law": 10,
+      "bad_idea": 11,
+      "raid_song": 12,
+      "sneaky_feeling": 13,
+      "shiny_want": 14
+    }
+  },
+  "soul": {
+    "default": {
+      "human": 1,
+      "human_settler": 2,
+      "human_builder": 3,
+      "goblin_runt": 4,
+      "goblin_boss": 5
+    }
+  },
+  "tile": {
+    "default": {
+      "plains": 1,
+      "forest": 2,
+      "road": 3,
+      "riverbank": 4,
+      "stony_ground": 5,
+      "burned_ground": 6,
+      "shallow_cave": 7,
+      "meadow": 8,
+      "dirt_road": 9,
+      "farm_plot": 10,
+      "work_yard": 11,
+      "watch_post": 12,
+      "goblin_trail": 13,
+      "squatter_camp": 14,
+      "mushroom_patch": 15,
+      "trash_heap": 16
+    }
+  },
+  "tile_object": {
+    "default": {
+      "tree": 1,
+      "boulder": 2,
+      "spring": 3,
+      "old_bones": 4,
+      "wooden_marker": 5,
+      "stone_wall": 6,
+      "spike_trap": 7,
+      "shrieking_idol": 8
+    }
+  }
+}

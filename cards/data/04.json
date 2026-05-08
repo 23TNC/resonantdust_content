@@ -1,0 +1,164 @@
+[
+  {
+    "card_type": "discipline",
+    "category": "default",
+    "cards": {
+      "raid":     [ "Raid",
+        ["#E05D4F", "#ecd6aa", "#0b1426"],
+        [["combat", 3], ["chaos", 3], ["explore", 1]]
+      ],
+      "scavenge": [ "Scavenge",
+        ["#A8845A", "#ecd6aa", "#0b1426"],
+        [["explore", 2], ["chaos", 2], ["craft", 1]]
+      ],
+      "sneak":    [ "Sneak",
+        ["#4A5568", "#ecd6aa", "#0b1426"],
+        [["dark", 3], ["skill", 2], ["explore", 1]]
+      ],
+      "torch":    [ "Torch",
+        ["#E08A4F", "#0b1426", "#0b1426"],
+        [["fire", 3], ["chaos", 2], ["combat", 1]]
+      ],
+      "swarm":    [ "Swarm",
+        ["#97e3a7", "#0b1426", "#0b1426"],
+        [["body", 2], ["chaos", 3], ["combat", 1]]
+      ],
+      "scheme":   [ "Scheme",
+        ["#B982C9", "#ecd6aa", "#0b1426"],
+        [["mind", 2], ["chaos", 2], ["dark", 1]]
+      ]
+    }
+  },
+  {
+    "card_type": "faculty",
+    "category": "default",
+    "cards": {
+      "scrapper":      [ "Scrapper",
+        ["#8A4F3D", "#ecd6aa", "#0b1426"],
+        [["combat", 2], ["corpus", 2], ["chaos", 1]]
+      ],
+      "sneakthief":    [ "Sneakthief",
+        ["#4A5568", "#ecd6aa", "#0b1426"],
+        [["dark", 3], ["skill", 2], ["sollertia", 1]]
+      ],
+      "mushroom_mind": [ "Mushroom Mind",
+        ["#B982C9", "#ecd6aa", "#0b1426"],
+        [["mind", 2], ["earth", 1], ["chaos", 2]]
+      ],
+      "bug_biter":     [ "Bug Biter",
+        ["#97e3a7", "#0b1426", "#0b1426"],
+        [["body", 2], ["food", 1], ["combat", 2]]
+      ],
+      "firestarter":   [ "Firestarter",
+        ["#E08A4F", "#0b1426", "#0b1426"],
+        [["fire", 3], ["chaos", 2], ["craft", 1]]
+      ],
+      "junkwright":    [ "Junkwright",
+        ["#8E8F91", "#ecd6aa", "#0b1426"],
+        [["craft", 3], ["metal", 1], ["chaos", 2]]
+      ]
+    }
+  },
+  {
+    "card_type": "requisite",
+    "category": "default",
+    "cards": {
+      "sharp_stick":  [ "Sharp Stick",
+        ["#8B5E3C", "#ecd6aa", "#0b1426"],
+        [["wood", 2], ["combat", 2], ["chaos", 1]]
+      ],
+      "rusty_knife":  [ "Rusty Knife",
+        ["#9B5A48", "#ecd6aa", "#0b1426"],
+        [["metal", 1], ["combat", 3], ["chaos", 1]]
+      ],
+      "stink_bomb":   [ "Stink Bomb",
+        ["#97e3a7", "#0b1426", "#0b1426"],
+        [["chaos", 3], ["dark", 1], ["combat", 1]]
+      ],
+      "torch_bundle": [ "Torch Bundle",
+        ["#E08A4F", "#0b1426", "#0b1426"],
+        [["fire", 3], ["fuel", 2], ["chaos", 1]]
+      ],
+      "junk_pile":    [ "Junk Pile",
+        ["#777B7E", "#ecd6aa", "#0b1426"],
+        [["metal", 1], ["wood", 1], ["stone", 1], ["chaos", 2]]
+      ],
+      "cave_grub":    [ "Cave Grub",
+        ["#D6C8A8", "#3a3a4a", "#0b1426"],
+        [["food", 2], ["dark", 1], ["body", 1]]
+      ]
+    }
+  },
+  {
+    "card_type": "revery",
+    "category": "default",
+    "cards": {
+      "bad_idea":       [ "Bad Idea",
+        ["#E05D4F", "#ecd6aa", "#0b1426"],
+        [["memory", 1], ["chaos", 3], ["mind", 1]]
+      ],
+      "raid_song":      [ "Raid Song",
+        ["#E08A4F", "#0b1426", "#0b1426"],
+        [["memory", 1], ["combat", 2], ["soul", 1]]
+      ],
+      "sneaky_feeling": [ "Sneaky Feeling",
+        ["#4A5568", "#ecd6aa", "#0b1426"],
+        [["dark", 2], ["skill", 1], ["memory", 1]]
+      ],
+      "shiny_want":     [ "Shiny Want",
+        ["#FFD966", "#0b1426", "#0b1426"],
+        [["mind", 1], ["chaos", 2], ["memory", 1]]
+      ]
+    }
+  },
+  {
+    "card_type": "soul",
+    "category": "default",
+    "cards": {
+      "goblin_runt": [ "Goblin Runt",
+        ["#97e3a7", "#0b1426", "#0b1426"],
+        [["body", 1], ["skill", 2], ["soul", 1], ["chaos", 3]]
+      ],
+      "goblin_boss": [ "Goblin Boss",
+        ["#E05D4F", "#ecd6aa", "#0b1426"],
+        [["body", 2], ["mind", 1], ["soul", 2], ["chaos", 3]]
+      ]
+    }
+  },
+  {
+    "card_type": "tile",
+    "category": "default",
+    "cards": {
+      "goblin_trail":   [ "Goblin Trail",
+        ["#6B5A35", "#ecd6aa", "#0b1426"],
+        [["earth", 1], ["explore", 3], ["chaos", 2], ["height", 16]]
+      ],
+      "squatter_camp":  [ "Squatter Camp",
+        ["#6F5A3A", "#ecd6aa", "#0b1426"],
+        [["chaos", 3], ["fire", 1], ["body", 1], ["height", 20]]
+      ],
+      "mushroom_patch": [ "Mushroom Patch",
+        ["#B982C9", "#ecd6aa", "#0b1426"],
+        [["food", 2], ["earth", 2], ["chaos", 1], ["height", 14]]
+      ],
+      "trash_heap":     [ "Trash Heap",
+        ["#777B7E", "#ecd6aa", "#0b1426"],
+        [["metal", 1], ["wood", 1], ["chaos", 3], ["height", 26]]
+      ]
+    }
+  },
+  {
+    "card_type": "tile_object",
+    "category": "default",
+    "cards": {
+      "spike_trap":     [ "Spike Trap",
+        ["#8B5E3C", "#ecd6aa", "#0b1426"],
+        [["wood", 2], ["combat", 2], ["defence", 1], ["height", 12]]
+      ],
+      "shrieking_idol": [ "Shrieking Idol",
+        ["#6E5AA8", "#ecd6aa", "#0b1426"],
+        [["dark", 2], ["soul", 2], ["chaos", 2], ["height", 30]]
+      ]
+    }
+  }
+]

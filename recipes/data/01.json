@@ -1,0 +1,127 @@
+[
+  {
+    "type": "stack",
+    "up": [
+      {
+        "id": "tripple_corpus",
+        "slots": [
+            ["corpus"],
+            ["corpus"],
+            ["corpus"]
+        ],
+        "reagents": [1],
+        "duration": 10,
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      },
+      {
+        "id": "dread_remover",
+        "slots": [
+            ["dread"],
+            ["dread"]
+        ],
+        "reagents": [1, 2],
+        "duration": 10,
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      },
+      {
+        "id": "corpus_up",
+        "slots": [
+            ["corpus"],
+            ["corpus"]
+        ],
+        "reagents": [1],
+        "output_success": { "inventory": { "root": ["fatigue"] } },
+        "duration": 10,
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      },
+      {
+        "id": "woodcutting",
+        "slots": [
+            [["labor", 1], [], ["wood", 1]],
+            ["corpus"]
+        ],
+        "reagents": [1],
+        "output_success": {
+          "inventory": {
+            "root": ["fatigue"],
+            "actor": [["log", [4, 1], "vigor"]]
+          }
+        },
+        "duration": 30,
+        "style": ["ltr", "#ecd6aa", "#9b927d"]
+      }
+    ],
+    "down": [
+      {
+        "id": "corpus_down_aspect",
+        "slots": [
+            ["corpus", 1],
+            ["corpus"]
+        ],
+        "reagents": [1],
+        "duration": 10,
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      },
+      {
+        "id": "corpus_down",
+        "slots": [
+            ["corpus"],
+            ["corpus"]
+        ],
+        "reagents": [1],
+        "output_success": { "inventory": { "root": ["corpus"] } },
+        "duration": 10,
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      }
+    ]
+  },
+  {
+    "type": "on_create",
+    "self": [
+      {
+        "id": "fatigue",
+        "root": ["fatigue"],
+        "reagents": ["root"],
+        "output_success": { "inventory": { "actor": ["corpus"] } },
+        "duration": 30,
+        "style": ["rtl", "#9b927d", "#ecd6aa"]
+      },
+      {
+        "id": "fleeting",
+        "root": [["fleeting", 1]],
+        "reagents": ["root"],
+        "duration": 
+        [
+            [20, [["fleeting", 4]]],
+            [15, [["fleeting", 3]]],
+            [10, [["fleeting", 2]]],
+            5
+        ],
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      },
+      {
+        "id": "despair",
+        "hex": ["despair"],
+        "magnetic": {
+          "type": "stack",
+          "up": [
+            {
+              "hex": ["despair"],
+              "root": ["dread"],
+              "reagents": ["hex", "root"],
+              "set_start": { "root": ["drop_hold", "position_hold"] },
+              "output_success": { "inventory": { "hex": ["dread"] } },
+              "duration": 5,
+              "style": ["cw", "#ecd6aa", "#9b927d"]
+            }
+          ]
+        },
+        "set_start": { "hex": ["drop_locked"] },
+        "output_success": { "inventory": { "actor": ["corpus"] } },
+        "output_fail": { "inventory": { "actor": ["fatigue"] } },
+        "interval": 10,
+        "style": ["rtl", "#8B2020", "#4caf6f"]
+      }
+    ]
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "_comment": "Bit-flag registry for the `cards.flags`, `actions.flags`, and `magnetic_actions.flags` u8 columns. Each entry pins an explicit bit position in [0, 7]: single-bit flags use `bit` (a number), multi-bit fields use `bits` (an array of bit positions, low-to-high). Append-only — once a bit (or set of bits) is assigned a name, never reuse it for a different meaning. Removed flags / fields should leave a `_reserved_<bit>` tombstone so a future feature can't silently inherit the old semantics.",
+
+  "cards": {
+    "_comment": "Bits in `Card.flags` (u8). Freshly-inserted cards have all bits clear. Server-side: `cards::insert_card_row` zero-initializes the field; specific bits are set/cleared by the feature that introduced them.",
+
+    "position_hold":   { "bit": 0, "description": "**Temporary** position hold — clears once the holder is done. Set by an active user drag, an in-flight animation, or the server while a magnetic action is using this card as a slot filler; cleared by the same system on drop / animation end / action end. While set: the user cannot pick the card up, and automatic layout must not reposition it." },
+    "position_locked": { "bit": 1, "description": "**Permanent** position lock — never clears under normal play. Set on cards whose location is part of their identity (world tiles in their cells, anchored event cards, etc.). While set: the user cannot pick the card up, ever; only deliberate admin / migration code clears it." },
+    "layer_locked":    { "bit": 2, "description": "Card is locked to its current layer and may not be moved to a different layer." },
+    "drop_hold":       { "bit": 3, "description": "**Temporary** drop hold — card is currently mid-drop and must not be re-picked or repositioned until the drop resolves." },
+    "drop_locked":     { "bit": 4, "description": "**Permanent** drop lock — card cannot be dropped at all; attempts to drop it must be rejected." },
+    "dead":            { "bit": 7, "description": "Server has marked this card as dead — typically a recipe consumed it as a reagent. Set via UPDATE (rather than DELETE) so the write carries `valid_at` (the server's unix-seconds 'this happened at' timestamp); the client treats the bit flip as the death event and times its dying animation against `valid_at` instead of receive time. Cards-only — actions and magnetic_actions delete immediately and have no equivalent bit." }
+  }
+}

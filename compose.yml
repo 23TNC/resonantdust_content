@@ -1,0 +1,24 @@
+services:
+  check:
+    image: clockworklabs/spacetime:latest
+    volumes:
+      - .:/workspace/data
+    working_dir: /workspace/data
+    entrypoint: ["cargo"]
+    command: ["check", "--all-targets"]
+
+  build:
+    image: clockworklabs/spacetime:latest
+    volumes:
+      - .:/workspace/data
+    working_dir: /workspace/data
+    entrypoint: ["cargo"]
+    command: ["build", "--release"]
+
+  test:
+    image: clockworklabs/spacetime:latest
+    volumes:
+      - .:/workspace/data
+    working_dir: /workspace/data
+    entrypoint: ["cargo"]
+    command: ["test"]

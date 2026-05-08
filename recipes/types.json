@@ -1,0 +1,14 @@
+{
+  "_comment": "Recipe type registry. Authoritative source for recipe type/category id → name mapping shared between TS client and Rust server. Types identify the trigger mechanism; categories identify the branch direction or match mode within a type. IDs are stable — never reassign a numeric id once used; tombstone removed entries with a _reserved_ prefix.",
+
+  "types": {
+    "stack":     { "id": 0, "_comment": "Player-built stacks. Matched when a client submits a stack via submit_inventory_stacks." },
+    "on_create": { "id": 1, "_comment": "Triggered automatically when a card is inserted via insert_card_row." }
+  },
+
+  "categories": {
+    "up":   { "id": 0, "valid_for": ["stack"],     "_comment": "Top branch — recipe slots extend upward from the root." },
+    "down": { "id": 1, "valid_for": ["stack"],     "_comment": "Bottom branch — recipe slots extend downward from the root." },
+    "self": { "id": 2, "valid_for": ["on_create"], "_comment": "The newly created card is both root and actor." }
+  }
+}

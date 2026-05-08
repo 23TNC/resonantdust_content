@@ -1,0 +1,22 @@
+{
+  "on_create": {
+    "self": {
+      "fatigue": 1,
+      "fleeting": 2,
+      "despair": 3
+    }
+  },
+  "stack": {
+    "down": {
+      "corpus_down_aspect": 1,
+      "corpus_down": 2
+    },
+    "up": {
+      "tripple_corpus": 1,
+      "corpus_up_aspect": 2,
+      "corpus_up": 3,
+      "woodcutting": 4,
+      "dread_remover": 5
+    }
+  }
+}

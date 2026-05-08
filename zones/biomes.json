@@ -1,0 +1,23 @@
+{
+  "_comment": "Biome registry for procedural map generation. Each biome carries a center in climate space and a weighted tile distribution; the map generator samples a climate vector per cell and blends biomes by inverse-square distance from the cell's climate point to each biome's center, summing tile weights into one combined distribution and picking a tile from it. Tile aspects (food, wood, height, …) on the resolved CardDefinitions drive downstream game behavior — biomes only choose which definition_id goes where.",
+
+  "_rules": {
+    "climate_axes":   "temperature, humidity — both in [0.0, 1.0]",
+    "tile_keys":      "must be a card key inside card_type 'tile' / category 'default'",
+    "tile_weights":   "positive integers; relative within a biome",
+    "category_note":  "biomes are category-agnostic — the zone's category byte selects the visual variant (e.g. 'sunny' vs 'winter') and tile data must mirror the same key→definition_id mapping across categories for that swap to land cleanly"
+  },
+
+  "biomes": {
+    "plains": {
+      "temperature": 0.65,
+      "humidity":    0.30,
+      "tiles": { "plains": 9, "forest": 1 }
+    },
+    "forest": {
+      "temperature": 0.50,
+      "humidity":    0.75,
+      "tiles": { "forest": 7, "plains": 3 }
+    }
+  }
+}
