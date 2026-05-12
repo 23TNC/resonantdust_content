@@ -11,7 +11,7 @@
         ],
         "reagents": [1],
         "duration": 10,
-        "style": ["rtl", "#8B2020", "#4caf6f"]
+        "style": 2
       },
       {
         "id": "dread_remover",
@@ -21,7 +21,7 @@
         ],
         "reagents": [1, 2],
         "duration": 10,
-        "style": ["rtl", "#8B2020", "#4caf6f"]
+        "style": 1
       },
       {
         "id": "corpus_up",
@@ -32,7 +32,7 @@
         "reagents": [1],
         "output_success": { "inventory": { "root": ["fatigue"] } },
         "duration": 10,
-        "style": ["rtl", "#8B2020", "#4caf6f"]
+        "style": 2
       },
       {
         "id": "woodcutting",
@@ -48,7 +48,7 @@
           }
         },
         "duration": 30,
-        "style": ["ltr", "#ecd6aa", "#9b927d"]
+        "style": 1
       }
     ],
     "down": [
@@ -60,7 +60,7 @@
         ],
         "reagents": [1],
         "duration": 10,
-        "style": ["rtl", "#8B2020", "#4caf6f"]
+        "style": 2
       },
       {
         "id": "corpus_down",
@@ -71,7 +71,7 @@
         "reagents": [1],
         "output_success": { "inventory": { "root": ["corpus"] } },
         "duration": 10,
-        "style": ["rtl", "#8B2020", "#4caf6f"]
+        "style": 2
       }
     ]
   },
@@ -84,7 +84,7 @@
         "reagents": ["root"],
         "output_success": { "inventory": { "actor": ["corpus"] } },
         "duration": 30,
-        "style": ["rtl", "#9b927d", "#ecd6aa"]
+        "style": 2
       },
       {
         "id": "fleeting",
@@ -97,31 +97,51 @@
             [10, [["fleeting", 2]]],
             5
         ],
-        "style": ["rtl", "#8B2020", "#4caf6f"]
-      },
+        "style": 2
+      }
+    ],
+    "magnetic": [
       {
         "id": "despair",
         "hex": ["despair"],
-        "magnetic": {
-          "type": "stack",
-          "up": [
-            {
-              "hex": ["despair"],
-              "root": ["dread"],
-              "reagents": ["hex", "root"],
-              "set_start": { "root": ["drop_hold", "position_hold"] },
-              "output_success": { "inventory": { "hex": ["dread"] } },
-              "duration": 5,
-              "style": ["cw", "#ecd6aa", "#9b927d"]
-            }
-          ]
+        "set_start": { 
+          "hex": {"drop_locked": true, "surface_locked": true} 
         },
-        "set_start": { "hex": ["drop_locked"] },
-        "output_success": { "inventory": { "actor": ["corpus"] } },
-        "output_fail": { "inventory": { "actor": ["fatigue"] } },
-        "interval": 10,
-        "style": ["rtl", "#8B2020", "#4caf6f"]
+        "magnetic_success": "magnetic.up.despair_success",
+        "magnetic_failure": "magnetic.up.despair_failure",
+        "grace": 50,
+        "duration": 60,
+        "style": 1
       }
+    ]
+  },
+  {
+    "type": "magnetic",
+    "up": [
+      {
+        "id": "despair_success",
+        "hex": ["despair"],
+        "root": ["dread"],
+        "reagents": ["hex", "root"],
+        "set_start": {
+          "root": {"drop_hold": true, "position_hold": true} 
+        },
+        "output_success": { "inventory": { "hex": ["corpus"] } },
+        "duration": 5,
+        "style": 1
+      },
+      {
+        "id": "despair_failure",
+        "hex": ["despair"],
+        "reagents": ["hex"],
+        "set_start": {},
+        "output_success": { "inventory": { "hex": ["dread"] } },
+        "duration": 5,
+        "style": 1
+      }
+    ],
+    "down": [
+      
     ]
   }
 ]

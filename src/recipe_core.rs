@@ -90,7 +90,24 @@ pub enum Entity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecipeType {
   Stack(StackDirection),
+  /// `on_create/self`. Trigger fires when a matching card is inserted;
+  /// the new card is both root and actor of the resulting action.
   OnCreate,
+  /// `on_create/magnetic`. Trigger fires when a matching card is
+  /// inserted, but instead of queueing an action directly it installs
+  /// a magnetic-phase ticker on the new card. The outer recipe carries
+  /// `magnetic_success` / `magnetic_failure` string ids referencing two
+  /// inner recipes filed under `magnetic/{success,failure}`; the ticker
+  /// resolves those refs at runtime to decide which inner to queue.
+  OnCreateMagnetic,
+  /// Inner recipes a magnetic ticker dispatches to. They live as
+  /// top-level recipes under `type:"magnetic"` (with category
+  /// `success` or `failure`) and are referenced by id from the
+  /// `on_create/magnetic` outer's `magnetic_success` / `magnetic_failure`
+  /// fields. Inner recipes carry their own duration, slots, reagents,
+  /// and output — they're regular recipes, just lookup-only (never
+  /// matched directly against a chain).
+  Magnetic(MagneticOutcome),
 }
 
 /// Which way a stack recipe walks the chain from the submitted root.
@@ -104,60 +121,31 @@ pub enum StackDirection {
   Down,
 }
 
-/// Magnetic recipes nest a bucket-style sub-tree of *inner* recipes
-/// inside the outer recipe's `magnetic` field. The outer is a normal
-/// recipe (matched against the chain like anything else); the inner
-/// recipes describe what cards the magnetic phase pulls from the
-/// player's inventory and stacks onto the magnetic action's anchor.
-///
-/// Schema:
-///
-/// ```json
-/// "magnetic": {
-///   "type": "stack",
-///   "up":   [ {inner}, {inner}, … ],
-///   "down": [ {inner}, … ]
-/// }
-/// ```
-///
-/// At parse time we flatten the directional arrays into a single
-/// `inners` list, baking each inner's direction into its
-/// `recipe_type`. The flat order is the same order the parser walked,
-/// which is the index used for the *sub-id* stored in the queued
-/// inner action's `flags` (high 4 bits — capped at 16 inners per
-/// outer).
-#[derive(Debug, Clone)]
-pub struct MagneticBucket {
-  pub inners: Vec<InnerRecipe>,
+/// Which branch of a magnetic outer's two id-referenced inner recipes
+/// this recipe lives under. See [`RecipeType::Magnetic`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MagneticOutcome {
+  Success,
+  Failure,
 }
 
-/// One inner recipe inside a [`MagneticBucket`]. Like a top-level
-/// recipe but without `id` (sub-identified by its position in
-/// `MagneticBucket.inners`), without nested `magnetic` (the design
-/// doesn't recurse — magnetic recipes can't themselves contain
-/// magnetic recipes), and without `interval` (only the outer carries
-/// the magnetic phase cadence).
-///
-/// `recipe_type` is baked in from the bucket's direction key at parse
-/// time: under `"up"` it's `Stack(Up)`, under `"down"` it's
-/// `Stack(Down)`, under `"self"` it's `OnCreate`. The tick uses this
-/// to know which way to walk the chain when matching slot fillers.
-///
-/// `duration` is the inner action's duration (in seconds) once the
-/// magnetic phase queues it into `actions` — distinct from the outer
-/// recipe's `duration`, which is the magnetic-phase loop-count cap.
-#[derive(Debug, Clone)]
-pub struct InnerRecipe {
-  pub recipe_type: RecipeType,
-  pub root: Option<Entity>,
-  pub hex: Option<Entity>,
-  pub slots: Vec<Entity>,
-  pub reagents: Vec<Reagent>,
-  pub output_success: Vec<ProductGroup>,
-  pub duration: Duration,
-  /// Flags to set on pulled cards when this inner's magnetic phase
-  /// acquires them. See [`SetStartFlags`].
-  pub set_start: SetStartFlags,
+/// String-id references to the two inner recipes a magnetic outer
+/// (filed under `on_create/magnetic`) dispatches between. The outer
+/// names them via `magnetic_success` / `magnetic_failure` string id
+/// fields in the JSON; we resolve those names to stable `recipe_id`s
+/// in `build_recipes` after every recipe has been parsed, so refs can
+/// target recipes declared later in the file. The referenced recipes
+/// are full [`RecipeDef`]s in their own right (filed under
+/// `magnetic/{success,failure}`) and queryable via
+/// [`recipes_of_type`] / `recipe_by_id`.
+#[derive(Debug, Clone, Copy)]
+pub struct MagneticRefs {
+  /// Stable id of the success-branch inner recipe. Must resolve to a
+  /// recipe whose `recipe_type` is `Magnetic(Success)`.
+  pub success: u16,
+  /// Stable id of the failure-branch inner recipe. Must resolve to a
+  /// recipe whose `recipe_type` is `Magnetic(Failure)`.
+  pub failure: u16,
 }
 
 /// Where the output cards from a completed action go. Two independent
@@ -346,12 +334,10 @@ pub struct RecipeDef {
   pub hex: Option<Entity>,
   /// Slot list. For `Stack(_)` recipes, slot 1 is the actor; slots 2..
   /// fill in chain order from the actor outward along the recipe's
-  /// branch direction. Empty for non-magnetic `OnCreate`. **For
-  /// magnetic recipes** (`magnetic.is_some()`), the slots describe the
-  /// inputs the server pulls from the player's inventory — the actor
-  /// is *not* in this list — and `slots[0]` is the first magnetic
-  /// input, stacked on the actor (or attached as a hex root if the
-  /// actor is hex-shaped) and so on.
+  /// branch direction. Empty for `OnCreate` and `OnCreateMagnetic`
+  /// (those match on `root` / `hex` only). For `Magnetic(_)` inner
+  /// recipes the slots describe inputs the magnetic ticker pulls from
+  /// the player's inventory at completion time.
   pub slots: Vec<Entity>,
   /// What the recipe consumes on completion. See [`Reagent`] —
   /// strings `"root"` / `"hex"` and 1-indexed slot integers in JSON.
@@ -372,18 +358,14 @@ pub struct RecipeDef {
   /// it for those. `None` on a magnetic outer means "no terminator —
   /// magnetic action runs until it queues an inner or is cancelled".
   pub duration: Option<Duration>,
-  /// When set, this recipe is *magnetic*: `magnetic.rs` installs a
-  /// scheduled tick that pulls inventory cards into the action's
-  /// chain per the bucket's inner recipes, then queues an inner
-  /// action into `actions` once any inner's slot list is fully
-  /// filled. The outer recipe's `slots` / `reagents` /
-  /// `output_success` / `output_failure` describe the magnetic
-  /// *outer*: matched at install time, fired
-  /// at magnetic-action completion — `output_success` fires when an
-  /// inner gets queued, `output_failure` fires when the loop cap is
-  /// reached without queueing one. The inner recipe's fields fire at
-  /// the queued inner action's completion.
-  pub magnetic: Option<MagneticBucket>,
+  /// Set only on `OnCreateMagnetic` recipes — the two id-referenced
+  /// inner recipes the magnetic ticker dispatches between. `success`
+  /// fires when an inner's slot list is filled; `failure` fires when
+  /// the loop cap is reached. The outer recipe's `output_success` /
+  /// `output_failure` describe what the *outer* produces on those
+  /// terminations; the inner's own fields fire at the queued inner
+  /// action's completion.
+  pub magnetic: Option<MagneticRefs>,
   /// Tick cadence in seconds for the magnetic phase. Only meaningful
   /// when `magnetic.is_some()`; ignored otherwise. The magnetic_action
   /// schedules a tick every `interval` seconds; each tick attempts
@@ -395,6 +377,13 @@ pub struct RecipeDef {
   /// For non-magnetic recipes this struct is currently unused (all zeros).
   /// See [`SetStartFlags`].
   pub set_start: SetStartFlags,
+  /// Progress-bar style for this recipe's actor completion row, in the
+  /// range `0..=7`. The value is destined for the `progress_style`
+  /// 3-bit field on `Card.flags` (see `cards/flags.json`); use
+  /// [`crate::flags_core::card_flag_field`] with the name
+  /// `"progress_style"` to pack it into the right bit positions at
+  /// completion time. `0` = no progress bar.
+  pub style: u8,
 }
 
 const RECIPES_FILES: &[(&str, &str)] = &[
@@ -715,6 +704,9 @@ fn recipe_type_names(rt: RecipeType) -> (&'static str, &'static str) {
     RecipeType::Stack(StackDirection::Up) => ("stack", "up"),
     RecipeType::Stack(StackDirection::Down) => ("stack", "down"),
     RecipeType::OnCreate => ("on_create", "self"),
+    RecipeType::OnCreateMagnetic => ("on_create", "magnetic"),
+    RecipeType::Magnetic(MagneticOutcome::Success) => ("magnetic", "success"),
+    RecipeType::Magnetic(MagneticOutcome::Failure) => ("magnetic", "failure"),
   }
 }
 
@@ -852,6 +844,10 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
   let mut by_id: BTreeMap<u16, RecipeDef> = BTreeMap::new();
   let mut id_by_name: BTreeMap<String, u16> = BTreeMap::new();
   let mut by_type: BTreeMap<(u8, u8), Vec<u16>> = BTreeMap::new();
+  // Magnetic outers' `magnetic_success` / `magnetic_failure` string
+  // refs, collected during the main parse and resolved to stable ids
+  // in a second pass once every recipe id is known.
+  let mut pending_magnetic: Vec<(u16, String, String, &'static str)> = Vec::new();
 
   for (filename, content) in RECIPES_FILES {
     let buckets_value: Value = serde_json::from_str(content)
@@ -866,8 +862,8 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{}: bucket missing 'type'", filename))?;
 
-      // Each bucket maps `type` to one or more direction-keyed arrays
-      // of recipes. The pairs below say "for each direction key the
+      // Each bucket maps `type` to one or more category-keyed arrays
+      // of recipes. The pairs below say "for each category key the
       // bucket's type allows, find the recipe array under that key
       // and tag its entries with this RecipeType."
       let direction_keys: &[(&str, RecipeType)] = match bucket_type {
@@ -875,10 +871,17 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
           ("up", RecipeType::Stack(StackDirection::Up)),
           ("down", RecipeType::Stack(StackDirection::Down)),
         ],
-        "on_create" => &[("self", RecipeType::OnCreate)],
+        "on_create" => &[
+          ("self", RecipeType::OnCreate),
+          ("magnetic", RecipeType::OnCreateMagnetic),
+        ],
+        "magnetic" => &[
+          ("success", RecipeType::Magnetic(MagneticOutcome::Success)),
+          ("failure", RecipeType::Magnetic(MagneticOutcome::Failure)),
+        ],
         other => {
           return Err(format!(
-            "{}: bucket has unknown type {:?}, expected \"stack\" or \"on_create\"",
+            "{}: bucket has unknown type {:?}, expected \"stack\", \"on_create\", or \"magnetic\"",
             filename, other,
           ));
         }
@@ -890,7 +893,7 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
         };
         let pair = recipe_type_pair(recipe_type)?;
         for recipe_value in arr {
-          let (id, stable_id, def) = parse_recipe(
+          let (id, stable_id, def, pending) = parse_recipe(
             recipe_value,
             recipe_type,
             filename,
@@ -906,20 +909,65 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
           by_type.entry(pair).or_default().push(stable_id);
           id_by_name.insert(id, stable_id);
           by_id.insert(stable_id, def);
+          if let Some((succ_id, fail_id)) = pending {
+            pending_magnetic.push((stable_id, succ_id, fail_id, filename));
+          }
         }
       }
+    }
+  }
+
+  // Second pass: resolve magnetic outers' `magnetic_success` /
+  // `magnetic_failure` string refs to stable recipe ids and patch them
+  // into the corresponding `RecipeDef.magnetic` fields. Done after the
+  // main loop so refs can target recipes declared later in the file.
+  // Also enforces that each ref points at a recipe of the correct
+  // category (`magnetic/success` and `magnetic/failure` respectively).
+  for (outer_id, succ_name, fail_name, filename) in pending_magnetic {
+    let success = *id_by_name.get(&succ_name).ok_or_else(|| {
+      format!(
+        "{}: magnetic outer recipe (stable_id={}) references unknown magnetic_success {:?}",
+        filename, outer_id, succ_name
+      )
+    })?;
+    let failure = *id_by_name.get(&fail_name).ok_or_else(|| {
+      format!(
+        "{}: magnetic outer recipe (stable_id={}) references unknown magnetic_failure {:?}",
+        filename, outer_id, fail_name
+      )
+    })?;
+    let succ_def = by_id.get(&success).expect("id_by_name and by_id share keys");
+    if succ_def.recipe_type != RecipeType::Magnetic(MagneticOutcome::Success) {
+      return Err(format!(
+        "{}: magnetic_success {:?} must be filed under magnetic/success (got {:?})",
+        filename, succ_name, succ_def.recipe_type
+      ));
+    }
+    let fail_def = by_id.get(&failure).expect("id_by_name and by_id share keys");
+    if fail_def.recipe_type != RecipeType::Magnetic(MagneticOutcome::Failure) {
+      return Err(format!(
+        "{}: magnetic_failure {:?} must be filed under magnetic/failure (got {:?})",
+        filename, fail_name, fail_def.recipe_type
+      ));
+    }
+    if let Some(def) = by_id.get_mut(&outer_id) {
+      def.magnetic = Some(MagneticRefs { success, failure });
     }
   }
 
   Ok(RecipeRegistry { by_id, id_by_name, by_type })
 }
 
-/// Parse one recipe record from inside a direction-keyed bucket array
-/// (`up` / `down` for `stack`, `self` for `on_create`). The
-/// surrounding bucket has already supplied the `recipe_type`; the
-/// record itself no longer carries a `type` field. Returns
-/// `(id, stable_id, def)` for the caller to register. `stable_ids` is
-/// the packed-u16 map built by `build_recipes` from the nested
+/// Parse one recipe record from inside a category-keyed bucket array
+/// (`up` / `down` for `stack`; `self` / `magnetic` for `on_create`;
+/// `success` / `failure` for `magnetic`). The surrounding bucket has
+/// already supplied the `recipe_type`; the record itself no longer
+/// carries a `type` field. Returns `(id, stable_id, def, pending_refs)`
+/// for the caller to register. `pending_refs` is `Some((success_id,
+/// failure_id))` only for `OnCreateMagnetic` recipes and is resolved
+/// into `def.magnetic` by `build_recipes` after every recipe is parsed
+/// (so refs can target recipes declared later in the file). `stable_ids`
+/// is the packed-u16 map built by `build_recipes` from the nested
 /// `recipes/id.json` (see [`pack_recipe`] for the layout).
 fn parse_recipe(
   recipe_value: &Value,
@@ -927,7 +975,7 @@ fn parse_recipe(
   filename: &str,
   type_ids: &BTreeMap<String, u8>,
   stable_ids: &BTreeMap<String, u16>,
-) -> Result<(String, u16, RecipeDef), String> {
+) -> Result<(String, u16, RecipeDef, Option<(String, String)>), String> {
   let id = recipe_value["id"]
     .as_str()
     .ok_or_else(|| format!("{}: recipe missing 'id'", filename))?
@@ -940,24 +988,58 @@ fn parse_recipe(
     )
   })?;
 
-  // `magnetic` is a nested bucket-style sub-tree. Same shape as the
-  // top-level recipe file (a `type` plus direction-keyed inner-recipe
-  // arrays), parsed into a flat `MagneticBucket.inners` list with each
-  // inner's `recipe_type` baked from the bucket's direction key.
-  let magnetic = if let Some(mag_value) = recipe_value.get("magnetic") {
-    let mag_obj = mag_value.as_object().ok_or_else(|| {
-      format!(
-        "{}: recipe {:?} 'magnetic' not an object",
-        filename, id
-      )
-    })?;
-    Some(parse_magnetic_bucket(mag_obj, filename, &id, type_ids)?)
+  // Magnetic outers (`on_create/magnetic`) name their two inner
+  // recipes via `magnetic_success` / `magnetic_failure` string-id
+  // fields. We capture them as a pending pair here; `build_recipes`
+  // resolves the strings to stable `recipe_id`s once every recipe has
+  // been parsed. Other recipe types must not carry these fields.
+  let pending_magnetic = if recipe_type == RecipeType::OnCreateMagnetic {
+    let succ = recipe_value
+      .get("magnetic_success")
+      .and_then(Value::as_str)
+      .ok_or_else(|| {
+        format!(
+          "{}: on_create/magnetic recipe {:?} missing required string field 'magnetic_success'",
+          filename, id
+        )
+      })?
+      .to_string();
+    let fail = recipe_value
+      .get("magnetic_failure")
+      .and_then(Value::as_str)
+      .ok_or_else(|| {
+        format!(
+          "{}: on_create/magnetic recipe {:?} missing required string field 'magnetic_failure'",
+          filename, id
+        )
+      })?
+      .to_string();
+    Some((succ, fail))
   } else {
+    for forbidden in ["magnetic_success", "magnetic_failure"] {
+      if recipe_value.get(forbidden).is_some() {
+        return Err(format!(
+          "{}: recipe {:?} has {:?} but is not filed under on_create/magnetic",
+          filename, id, forbidden
+        ));
+      }
+    }
     None
   };
+  // Legacy nested-magnetic sub-bucket — was supported pre-refactor, now
+  // rejected so stale recipe JSON doesn't silently drop its inner
+  // recipes.
+  if recipe_value.get("magnetic").is_some() {
+    return Err(format!(
+      "{}: recipe {:?} uses legacy nested 'magnetic' sub-bucket — move inner recipes \
+       to top-level type:\"magnetic\" buckets and reference them via \
+       'magnetic_success' / 'magnetic_failure' string ids",
+      filename, id
+    ));
+  }
 
-  // `interval` (seconds) — required when `magnetic.is_some()`, ignored
-  // otherwise. Drives the magnetic_action's recurring schedule.
+  // `interval` (seconds) — meaningful only on magnetic outers. Drives
+  // the magnetic_action's recurring schedule.
   let interval = match recipe_value.get("interval") {
     Some(v) => {
       let n = v.as_u64().ok_or_else(|| {
@@ -975,15 +1057,9 @@ fn parse_recipe(
     }
     None => None,
   };
-  if magnetic.is_some() && interval.is_none() {
+  if recipe_type != RecipeType::OnCreateMagnetic && interval.is_some() {
     return Err(format!(
-      "{}: magnetic recipe {:?} missing required 'interval' field",
-      filename, id
-    ));
-  }
-  if magnetic.is_none() && interval.is_some() {
-    return Err(format!(
-      "{}: non-magnetic recipe {:?} has 'interval' field with no 'magnetic' to consume it",
+      "{}: non-magnetic recipe {:?} has 'interval' field — only on_create/magnetic outers use it",
       filename, id
     ));
   }
@@ -1043,9 +1119,9 @@ fn parse_recipe(
     &id,
     "",
   )?;
-  if !output_failure.is_empty() && magnetic.is_none() {
+  if !output_failure.is_empty() && recipe_type != RecipeType::OnCreateMagnetic {
     return Err(format!(
-      "{}: recipe {:?} has 'output_fail' but no 'magnetic' field — \
+      "{}: recipe {:?} has 'output_fail' but is not an on_create/magnetic outer — \
        output_fail only fires when a magnetic outer's loop cap is reached",
       filename, id
     ));
@@ -1060,19 +1136,24 @@ fn parse_recipe(
   } else {
     None
   };
-  if duration.is_none() && magnetic.is_none() {
+  if duration.is_none() && recipe_type != RecipeType::OnCreateMagnetic {
     return Err(format!(
       "{}: non-magnetic recipe {:?} missing required 'duration' field",
       filename, id
     ));
   }
 
-  // OnCreate recipes match against the new card's def via either
-  // `hex` (must be a hex-shaped card matching the entity) or `root`
-  // (any card type matching the entity). At least one is required —
-  // an OnCreate recipe with neither has no way to identify what it
-  // fires on.
-  if recipe_type == RecipeType::OnCreate && root.is_none() && hex.is_none() {
+  // OnCreate recipes (both `self` and `magnetic` categories) match
+  // against the new card's def via either `hex` (must be a hex-shaped
+  // card matching the entity) or `root` (any card type matching the
+  // entity). At least one is required — an OnCreate recipe with
+  // neither has no way to identify what it fires on.
+  if matches!(
+    recipe_type,
+    RecipeType::OnCreate | RecipeType::OnCreateMagnetic
+  ) && root.is_none()
+    && hex.is_none()
+  {
     return Err(format!(
       "{}: on_create recipe {:?} must specify either 'root' or 'hex' to identify the target card",
       filename, id
@@ -1080,6 +1161,7 @@ fn parse_recipe(
   }
 
   let set_start = parse_set_start(recipe_value, filename, &id, "")?;
+  let style = parse_style(recipe_value, filename, &id, "")?;
 
   let def = RecipeDef {
     index: stable_id,
@@ -1092,183 +1174,24 @@ fn parse_recipe(
     output_success,
     output_failure,
     duration,
-    magnetic,
+    // Resolved by `build_recipes` in a second pass; `None` here for
+    // every recipe regardless of type. Magnetic outers get their
+    // `MagneticRefs` patched in once every recipe id is known.
+    magnetic: None,
     interval,
     set_start,
+    style,
   };
-  Ok((id, stable_id, def))
-}
-
-/// Parse a `magnetic` field into a [`MagneticBucket`]. Same dispatch
-/// logic as the top-level recipe file: bucket type ("stack" or
-/// "on_create") plus direction-keyed arrays. Inner recipes are flattened
-/// into `MagneticBucket.inners` in directional order.
-///
-/// The order matters — sub-id (the index a queued inner action carries
-/// in its `flags`) is the inner's position in this flat list. Stable
-/// across deploys as long as the JSON's direction keys and inner array
-/// order don't change.
-///
-/// At most 16 inners per bucket (sub-id is 4 bits in `Action.flags`).
-fn parse_magnetic_bucket(
-  bucket: &serde_json::Map<String, Value>,
-  filename: &str,
-  parent_id: &str,
-  type_ids: &BTreeMap<String, u8>,
-) -> Result<MagneticBucket, String> {
-  let bucket_type = bucket
-    .get("type")
-    .and_then(Value::as_str)
-    .ok_or_else(|| format!("{}: recipe {:?} magnetic bucket missing 'type'", filename, parent_id))?;
-
-  let direction_keys: &[(&str, RecipeType)] = match bucket_type {
-    "stack" => &[
-      ("up", RecipeType::Stack(StackDirection::Up)),
-      ("down", RecipeType::Stack(StackDirection::Down)),
-    ],
-    "on_create" => &[("self", RecipeType::OnCreate)],
-    other => {
-      return Err(format!(
-        "{}: recipe {:?} magnetic bucket has unknown type {:?}, expected \"stack\" or \"on_create\"",
-        filename, parent_id, other,
-      ));
-    }
-  };
-
-  let mut inners: Vec<InnerRecipe> = Vec::new();
-  for &(direction_key, recipe_type) in direction_keys {
-    let Some(arr) = bucket.get(direction_key).and_then(Value::as_array) else {
-      continue;
-    };
-    for (idx, inner_value) in arr.iter().enumerate() {
-      let path = format!("magnetic.{}[{}]", direction_key, idx);
-      inners.push(parse_inner_recipe(inner_value, recipe_type, filename, parent_id, &path, type_ids)?);
-    }
-  }
-
-  if inners.len() > MAGNETIC_MAX_INNERS {
-    return Err(format!(
-      "{}: recipe {:?} magnetic bucket has {} inners (max {}, sub-id is 3 bits in Action.flags)",
-      filename, parent_id, inners.len(), MAGNETIC_MAX_INNERS,
-    ));
-  }
-
-  Ok(MagneticBucket { inners })
-}
-
-/// Hard cap on inner recipes per magnetic bucket. The queued inner
-/// action stores its sub-id in 3 bits (bits 4..6) of `Action.flags`
-/// — bit 7 is reserved for [`crate::actions::FLAG_ACTION_DEAD`] —
-/// so 8 is the structural ceiling.
-pub const MAGNETIC_MAX_INNERS: usize = 8;
-
-/// Parse one inner recipe inside a magnetic bucket. Like
-/// [`parse_recipe`] but: no `id`, no nested `magnetic`, no `interval`,
-/// `recipe_type` is supplied by the caller from the bucket's direction
-/// key. `duration` is required (it's the queued inner action's
-/// duration). `path` is a JSON path fragment for error messages
-/// (`"magnetic.up[0]"` etc.).
-fn parse_inner_recipe(
-  recipe_value: &Value,
-  recipe_type: RecipeType,
-  filename: &str,
-  parent_id: &str,
-  path: &str,
-  type_ids: &BTreeMap<String, u8>,
-) -> Result<InnerRecipe, String> {
-  // Reject fields that don't apply to inner recipes — fail loud rather
-  // than silently dropping authorial intent. `products` was the legacy
-  // name for `output_success`; flagging it explicitly catches stale
-  // recipe JSON.
-  for forbidden in ["id", "magnetic", "interval", "products"] {
-    if recipe_value.get(forbidden).is_some() {
-      return Err(format!(
-        "{}: recipe {:?} {}: inner recipe must not have '{}' field",
-        filename, parent_id, path, forbidden
-      ));
-    }
-  }
-
-  let label = format!("{}/{}", parent_id, path);
-
-  let root = if recipe_value.get("root").is_some() {
-    Some(parse_entity(&recipe_value["root"], type_ids, filename, &label, "root")?)
-  } else {
-    None
-  };
-
-  let hex = if recipe_value.get("hex").is_some() {
-    Some(parse_entity(&recipe_value["hex"], type_ids, filename, &label, "hex")?)
-  } else {
-    None
-  };
-
-  let slots = if let Some(slots_arr) = recipe_value.get("slots").and_then(Value::as_array) {
-    slots_arr
-      .iter()
-      .enumerate()
-      .map(|(i, v)| parse_entity(v, type_ids, filename, &label, &format!("slots[{}]", i)))
-      .collect::<Result<Vec<_>, _>>()?
-  } else {
-    Vec::new()
-  };
-
-  let reagents = if let Some(arr) = recipe_value.get("reagents").and_then(Value::as_array) {
-    arr
-      .iter()
-      .map(|v| parse_reagent(v, filename, &label))
-      .collect::<Result<Vec<_>, _>>()?
-  } else {
-    Vec::new()
-  };
-
-  let output_success = parse_output_groups(
-    recipe_value,
-    "output_success",
-    type_ids,
-    filename,
-    &label,
-    path,
-  )?;
-  if recipe_value.get("output_fail").is_some() {
-    return Err(format!(
-      "{}: recipe {:?} {}: inner recipe must not have 'output_fail' field — \
-       only the magnetic outer fires on failure",
-      filename, parent_id, path
-    ));
-  }
-
-  // Inner duration is *required* — it becomes the queued inner action's
-  // duration in `actions`. Without it the queued action would have no
-  // end time.
-  let duration_value = recipe_value.get("duration").ok_or_else(|| {
-    format!(
-      "{}: recipe {:?} {}: inner recipe missing required 'duration' field",
-      filename, parent_id, path
-    )
-  })?;
-  let duration = parse_duration(duration_value, type_ids, filename, &label)?;
-
-  let set_start = parse_set_start(recipe_value, filename, &label, path)?;
-
-  Ok(InnerRecipe {
-    recipe_type,
-    root,
-    hex,
-    slots,
-    reagents,
-    output_success,
-    duration,
-    set_start,
-  })
+  Ok((id, stable_id, def, pending_magnetic))
 }
 
 /// Parse the `"set_start"` key on a recipe value into a
 /// [`SetStartFlags`] bitmask struct. Missing key → all-zero default
 /// (set nothing). Each sub-key (`"root"`, `"slot"`, `"hex"`) holds an
-/// array of card-flag names; each name maps to a fixed bit position in
-/// `Card.flags` (see `content/cards/flags.json`). `"dead"` is rejected — it
-/// cannot be set via `set_start`.
+/// object mapping card-flag names to booleans: `true` sets the bit,
+/// `false` (or omitted) leaves it clear. Flag names use the canonical
+/// spellings from `content/cards/flags.json`; `"dead"` is rejected —
+/// it cannot be set via `set_start`.
 fn parse_set_start(
   recipe_value: &Value,
   filename: &str,
@@ -1285,42 +1208,44 @@ fn parse_set_start(
   };
   let mut flags = SetStartFlags::default();
   for (sub_key, val) in obj {
-    let bits_arr = val.as_array().ok_or_else(|| {
+    let bits_obj = val.as_object().ok_or_else(|| {
       format!(
-        "{}: recipe {:?}{} set_start.{} not an array of flag names",
+        "{}: recipe {:?}{} set_start.{} not an object of flag→bool entries",
         filename, id_label, where_str, sub_key
       )
     })?;
     let mut mask: u8 = 0;
-    for (i, bit_val) in bits_arr.iter().enumerate() {
-      let name = bit_val.as_str().ok_or_else(|| {
+    for (name, bit_val) in bits_obj {
+      let set = bit_val.as_bool().ok_or_else(|| {
         format!(
-          "{}: recipe {:?}{} set_start.{}[{}] not a string",
-          filename, id_label, where_str, sub_key, i
+          "{}: recipe {:?}{} set_start.{}.{} not a boolean",
+          filename, id_label, where_str, sub_key, name
         )
       })?;
-      let bit: u8 = match name {
+      let bit: u8 = match name.as_str() {
         "position_hold"   => 0,
         "position_locked" => 1,
-        "layer_locked"    => 2,
+        "surface_locked"  => 2,
         "drop_hold"       => 3,
         "drop_locked"     => 4,
         "dead" => {
           return Err(format!(
-            "{}: recipe {:?}{} set_start.{}[{}]: 'dead' cannot be set via set_start",
-            filename, id_label, where_str, sub_key, i
+            "{}: recipe {:?}{} set_start.{}.{}: 'dead' cannot be set via set_start",
+            filename, id_label, where_str, sub_key, name
           ));
         }
         other => {
           return Err(format!(
-            "{}: recipe {:?}{} set_start.{}[{}]: unknown flag name {:?} \
-             (expected \"position_hold\", \"position_locked\", \"layer_locked\", \
+            "{}: recipe {:?}{} set_start.{}.{}: unknown flag name {:?} \
+             (expected \"position_hold\", \"position_locked\", \"surface_locked\", \
              \"drop_hold\", \"drop_locked\")",
-            filename, id_label, where_str, sub_key, i, other
+            filename, id_label, where_str, sub_key, name, other
           ));
         }
       };
-      mask |= 1u8 << bit;
+      if set {
+        mask |= 1u8 << bit;
+      }
     }
     match sub_key.as_str() {
       "root" => flags.root = mask,
@@ -1416,6 +1341,59 @@ fn parse_output_groups(
     }
   }
   Ok(groups)
+}
+
+/// Maximum recipe `style` value. The field is destined for the
+/// `progress_style` 3-bit slot on `Card.flags` (bits 8..=10 — see
+/// `cards/flags.json`), so the value has to fit in 3 bits. Hard-coded
+/// rather than queried from `flags_core` to keep the two registries
+/// decoupled at parse time; if `progress_style` ever widens, bump this.
+const RECIPE_STYLE_MAX: u64 = 0b111;
+
+/// Parse the `"style"` field on a recipe value. Required — every recipe
+/// (top-level and inner) must specify the progress-bar style its actor
+/// row carries on completion. Must be a non-negative integer in
+/// `0..=RECIPE_STYLE_MAX` (legacy array form is rejected with a clear
+/// error so old JSON fails loudly instead of silently dropping the
+/// field).
+fn parse_style(
+  recipe_value: &Value,
+  filename: &str,
+  id_label: &str,
+  path_prefix: &str,
+) -> Result<u8, String> {
+  let where_str: String = if path_prefix.is_empty() {
+    String::new()
+  } else {
+    format!(" {}", path_prefix)
+  };
+  let v = recipe_value.get("style").ok_or_else(|| {
+    format!(
+      "{}: recipe {:?}{} missing required 'style' field (u3 progress-bar style, 0..={})",
+      filename, id_label, where_str, RECIPE_STYLE_MAX
+    )
+  })?;
+  if v.is_array() {
+    return Err(format!(
+      "{}: recipe {:?}{} 'style' is an array — the legacy `[\"rtl\", \"#fff\", \"#000\"]` \
+       form is no longer supported; use a 0..={} integer that packs into the \
+       `progress_style` 3-bit field on Card.flags",
+      filename, id_label, where_str, RECIPE_STYLE_MAX
+    ));
+  }
+  let n = v.as_u64().ok_or_else(|| {
+    format!(
+      "{}: recipe {:?}{} 'style' not a non-negative integer: {:?}",
+      filename, id_label, where_str, v
+    )
+  })?;
+  if n > RECIPE_STYLE_MAX {
+    return Err(format!(
+      "{}: recipe {:?}{} 'style' value {} exceeds u3 max ({})",
+      filename, id_label, where_str, n, RECIPE_STYLE_MAX
+    ));
+  }
+  Ok(n as u8)
 }
 
 /// Sentinel string parsed as `Entity::Any`. Reserved — a card with this

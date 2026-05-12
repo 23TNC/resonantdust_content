@@ -14,7 +14,9 @@
 //!   JSON insertion order across all groups (id 0 reserved as `ASPECT_NONE`).
 //! - `cards/data/*.json` — per-file arrays of buckets, each bucket pinning a
 //!   `card_type` + `category` and listing its cards as
-//!   `{ key: [name, [c0, c1, c2], [[aspect_name, value], ...]] }`.
+//!   `{ key: { "name": str, "style": [c0, c1, c2],
+//!             "aspects": { aspect_name: value, ... },
+//!             "flags": [flag, ...] } }`.
 //!
 //! Card aspect names are translated to `AspectId`s at registry-build time;
 //! `CardDefinition.aspects` carries `(AspectId, i32)` pairs for fast runtime
@@ -180,6 +182,15 @@ pub struct CardDefinition {
   /// stored registry-build error. Each `aspect_id` appears at most once
   /// per definition.
   pub aspects: Vec<(AspectId, i32)>,
+  /// Bit-mask of flags applied to every card spawned with this
+  /// definition. Built at registry-build time by resolving each name
+  /// in the JSON `flags` array via [`crate::flags_core::card_flag_bit`]
+  /// and OR-ing the resulting bit positions. Unknown flag names are a
+  /// registry-build error. `cards::create` / `cards::create_at` on
+  /// the server OR this mask into the row's `flags` column so that,
+  /// e.g., a `despair` card spawns already carrying `drop_locked` +
+  /// `surface_locked` without any per-call-site bookkeeping.
+  pub flags: u32,
 }
 
 const CARD_TYPES_JSON: &str = include_str!("../cards/types.json");
@@ -461,24 +472,20 @@ fn parse_card(
   definition_id: u8,
   key: &str,
 ) -> Result<CardDefinition, String> {
-  let arr = value
-    .as_array()
-    .ok_or_else(|| format!("{}: card {}: spec not an array", filename, key))?;
-  if arr.len() < 3 {
-    return Err(format!(
-      "{}: card {}: spec needs [name, style, aspects]",
-      filename, key
-    ));
-  }
+  let obj = value
+    .as_object()
+    .ok_or_else(|| format!("{}: card {}: spec not an object", filename, key))?;
 
-  let name = arr[0]
-    .as_str()
-    .ok_or_else(|| format!("{}: card {}: name not a string", filename, key))?
+  let name = obj
+    .get("name")
+    .and_then(Value::as_str)
+    .ok_or_else(|| format!("{}: card {}: missing or non-string 'name'", filename, key))?
     .to_string();
 
-  let style_arr = arr[1]
-    .as_array()
-    .ok_or_else(|| format!("{}: card {}: style not an array", filename, key))?;
+  let style_arr = obj
+    .get("style")
+    .and_then(Value::as_array)
+    .ok_or_else(|| format!("{}: card {}: missing or non-array 'style'", filename, key))?;
   if style_arr.len() != 3 {
     return Err(format!(
       "{}: card {}: style needs exactly 3 entries",
@@ -491,25 +498,14 @@ fn parse_card(
     style_str(filename, key, style_arr, 2)?,
   ];
 
-  let aspects_arr = arr[2]
-    .as_array()
-    .ok_or_else(|| format!("{}: card {}: aspects not an array", filename, key))?;
+  let aspects_obj = obj
+    .get("aspects")
+    .and_then(Value::as_object)
+    .ok_or_else(|| format!("{}: card {}: missing or non-object 'aspects'", filename, key))?;
 
-  let mut aspects: Vec<(AspectId, i32)> = Vec::with_capacity(aspects_arr.len());
+  let mut aspects: Vec<(AspectId, i32)> = Vec::with_capacity(aspects_obj.len());
   let mut seen_aspect_ids: BTreeSet<AspectId> = BTreeSet::new();
-  for a in aspects_arr {
-    let pair = a
-      .as_array()
-      .ok_or_else(|| format!("{}: card {}: aspect not an array", filename, key))?;
-    if pair.len() != 2 {
-      return Err(format!(
-        "{}: card {}: aspect needs [name, value]",
-        filename, key
-      ));
-    }
-    let aspect_name = pair[0]
-      .as_str()
-      .ok_or_else(|| format!("{}: card {}: aspect name not a string", filename, key))?;
+  for (aspect_name, aspect_val) in aspects_obj.iter() {
     let id = aspect_id(aspect_name)?.ok_or_else(|| {
       format!(
         "{}: card {}: unknown aspect {:?} (not declared in aspects.json)",
@@ -522,10 +518,39 @@ fn parse_card(
         filename, key, aspect_name
       ));
     }
-    let aspect_value = pair[1].as_i64().ok_or_else(|| {
-      format!("{}: card {}: aspect value not an integer", filename, key)
+    let aspect_value = aspect_val.as_i64().ok_or_else(|| {
+      format!(
+        "{}: card {}: aspect {:?} value not an integer",
+        filename, key, aspect_name
+      )
     })? as i32;
     aspects.push((id, aspect_value));
+  }
+
+  // Resolve `flags` array into a bit-mask. Each entry must name a
+  // single-bit flag in `cards/flags.json` (via
+  // `flags_core::card_flag_bit`). Multi-bit fields (`progress_style`)
+  // are not addressable from a card definition — there's no JSON way
+  // to set a 3-bit value here, and per-card initial style is not a
+  // definition concern; the field is server-managed.
+  let flags_arr = obj
+    .get("flags")
+    .and_then(Value::as_array)
+    .ok_or_else(|| format!("{}: card {}: missing or non-array 'flags'", filename, key))?;
+  let mut flags: u32 = 0;
+  for (i, f) in flags_arr.iter().enumerate() {
+    let name = f.as_str().ok_or_else(|| {
+      format!("{}: card {}: flags[{}] not a string", filename, key, i)
+    })?;
+    let bit = crate::flags_core::card_flag_bit(name)
+      .map_err(|e| format!("{}: card {}: flags registry: {}", filename, key, e))?
+      .ok_or_else(|| {
+        format!(
+          "{}: card {}: flags[{}] unknown single-bit flag {:?} (not in cards/flags.json)",
+          filename, key, i, name
+        )
+      })?;
+    flags |= 1u32 << bit;
   }
 
   Ok(CardDefinition {
@@ -536,6 +561,7 @@ fn parse_card(
     name,
     style,
     aspects,
+    flags,
   })
 }
 

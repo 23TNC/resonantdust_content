@@ -42,11 +42,6 @@ def next_id(existing: dict) -> int:
 
 # ── Recipes ────────────────────────────────────────────────────────────────────
 
-BUCKET_LISTS = {
-    "stack":     ["up", "down"],
-    "on_create": ["self"],
-}
-
 
 def gen_recipe_ids(data_dir: Path) -> bool:
     recipes_dir = data_dir / "recipes"
@@ -75,13 +70,17 @@ def gen_recipe_ids(data_dir: Path) -> bool:
             continue
         for bucket in buckets:
             btype = bucket.get("type")
-            if btype not in BUCKET_LISTS:
-                errors.append(f"{recipe_file.name}: unknown bucket type {btype!r}")
+            if not btype:
+                errors.append(f"{recipe_file.name}: bucket missing 'type' field")
                 continue
-            for list_key in BUCKET_LISTS[btype]:
-                entries = bucket.get(list_key, [])
+            # Every list-valued key on the bucket (other than 'type') is a
+            # recipe category. This way adding a new bucket type — or a new
+            # category list under an existing type — needs no change here;
+            # duplicate-id detection is global so safety is preserved.
+            for list_key, entries in bucket.items():
+                if list_key == "type":
+                    continue
                 if not isinstance(entries, list):
-                    errors.append(f"{recipe_file.name}: '{btype}.{list_key}' is not an array")
                     continue
                 for recipe in entries:
                     rid = recipe.get("id")

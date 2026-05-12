@@ -3,12 +3,16 @@
 
   "types": {
     "stack":     { "id": 0, "_comment": "Player-built stacks. Matched when a client submits a stack via submit_inventory_stacks." },
-    "on_create": { "id": 1, "_comment": "Triggered automatically when a card is inserted via insert_card_row." }
+    "on_create": { "id": 1, "_comment": "Triggered automatically when a card is inserted via insert_card_row." },
+    "magnetic":  { "id": 2, "_comment": "Magnetic-phase inner recipes. Matched by the slot-fill ticker on a magnetic action's anchor; success/failure branches resolve when the loop queues an inner or runs out of budget." }
   },
 
   "categories": {
-    "up":   { "id": 0, "valid_for": ["stack"],     "_comment": "Top branch — recipe slots extend upward from the root." },
-    "down": { "id": 1, "valid_for": ["stack"],     "_comment": "Bottom branch — recipe slots extend downward from the root." },
-    "self": { "id": 2, "valid_for": ["on_create"], "_comment": "The newly created card is both root and actor." }
+    "up":       { "id": 0, "valid_for": ["stack"],     "_comment": "Top branch — recipe slots extend upward from the root." },
+    "down":     { "id": 1, "valid_for": ["stack"],     "_comment": "Bottom branch — recipe slots extend downward from the root." },
+    "self":     { "id": 2, "valid_for": ["on_create"], "_comment": "The newly created card is both root and actor." },
+    "magnetic": { "id": 3, "valid_for": ["on_create"], "_comment": "On-create recipe that installs a magnetic-phase ticker on the new card. The recipe's magnetic_success / magnetic_failure fields name the inner recipes the ticker dispatches to." },
+    "success":  { "id": 4, "valid_for": ["magnetic"],  "_comment": "Inner recipe fired when the magnetic phase finds a slot filler within its loop budget." },
+    "failure":  { "id": 5, "valid_for": ["magnetic"],  "_comment": "Inner recipe fired when the magnetic phase exhausts its loop budget without finding a filler." }
   }
 }
