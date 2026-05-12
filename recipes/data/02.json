@@ -1,0 +1,40 @@
+[
+  {
+    "type": "stack",
+    "up": [
+      {
+        "id": "cut_tree",
+        "hex": ["tree"],
+        "slots": [
+            ["corpus"]
+        ],
+        "reagents": ["hex", 1],
+        "output_success": { "inventory": { "actor": ["fatigue", "log"] } },
+        "duration": 10,
+        "style": 2
+      },
+      {
+        "id": "break_rock",
+        "hex": ["rock"],
+        "slots": [
+            ["corpus"]
+        ],
+        "reagents": ["hex", 1],
+        "output_success": { "inventory": { "actor": ["fatigue", "stone"] } },
+        "duration": 10,
+        "style": 2
+      }
+    ],
+    "down": []
+  },
+  {
+    "type": "on_create",
+    "self": [],
+    "magnetic": []
+  },
+  {
+    "type": "magnetic",
+    "up": [],
+    "down": []
+  }
+]

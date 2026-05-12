@@ -1,10 +1,8 @@
 {
   "magnetic": {
-    "failure": {
-      "despair_failure": 1
-    },
-    "success": {
-      "despair_success": 1
+    "up": {
+      "despair_success": 1,
+      "despair_failure": 2
     }
   },
   "on_create": {
@@ -25,7 +23,9 @@
       "tripple_corpus": 1,
       "dread_remover": 2,
       "corpus_up": 3,
-      "woodcutting": 4
+      "woodcutting": 4,
+      "cut_tree": 5,
+      "break_rock": 6
     }
   }
 }

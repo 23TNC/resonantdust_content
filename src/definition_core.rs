@@ -15,8 +15,7 @@
 //! - `cards/data/*.json` — per-file arrays of buckets, each bucket pinning a
 //!   `card_type` + `category` and listing its cards as
 //!   `{ key: { "name": str, "style": [c0, c1, c2],
-//!             "aspects": { aspect_name: value, ... },
-//!             "flags": [flag, ...] } }`.
+//!             "aspects": { aspect_name: value, ... } } }`.
 //!
 //! Card aspect names are translated to `AspectId`s at registry-build time;
 //! `CardDefinition.aspects` carries `(AspectId, i32)` pairs for fast runtime
@@ -183,13 +182,12 @@ pub struct CardDefinition {
   /// per definition.
   pub aspects: Vec<(AspectId, i32)>,
   /// Bit-mask of flags applied to every card spawned with this
-  /// definition. Built at registry-build time by resolving each name
-  /// in the JSON `flags` array via [`crate::flags_core::card_flag_bit`]
-  /// and OR-ing the resulting bit positions. Unknown flag names are a
-  /// registry-build error. `cards::create` / `cards::create_at` on
-  /// the server OR this mask into the row's `flags` column so that,
-  /// e.g., a `despair` card spawns already carrying `drop_locked` +
-  /// `surface_locked` without any per-call-site bookkeeping.
+  /// definition. Currently always 0 — per-definition flag presets are
+  /// not declared in card JSON. Kept on the struct because
+  /// `cards::create` / `cards::create_at` on the server still OR this
+  /// mask into the row's `flags` column; reintroduce JSON-driven
+  /// initialisation here when a definition needs to spawn cards with
+  /// non-zero flags again.
   pub flags: u32,
 }
 
@@ -527,32 +525,6 @@ fn parse_card(
     aspects.push((id, aspect_value));
   }
 
-  // Resolve `flags` array into a bit-mask. Each entry must name a
-  // single-bit flag in `cards/flags.json` (via
-  // `flags_core::card_flag_bit`). Multi-bit fields (`progress_style`)
-  // are not addressable from a card definition — there's no JSON way
-  // to set a 3-bit value here, and per-card initial style is not a
-  // definition concern; the field is server-managed.
-  let flags_arr = obj
-    .get("flags")
-    .and_then(Value::as_array)
-    .ok_or_else(|| format!("{}: card {}: missing or non-array 'flags'", filename, key))?;
-  let mut flags: u32 = 0;
-  for (i, f) in flags_arr.iter().enumerate() {
-    let name = f.as_str().ok_or_else(|| {
-      format!("{}: card {}: flags[{}] not a string", filename, key, i)
-    })?;
-    let bit = crate::flags_core::card_flag_bit(name)
-      .map_err(|e| format!("{}: card {}: flags registry: {}", filename, key, e))?
-      .ok_or_else(|| {
-        format!(
-          "{}: card {}: flags[{}] unknown single-bit flag {:?} (not in cards/flags.json)",
-          filename, key, i, name
-        )
-      })?;
-    flags |= 1u32 << bit;
-  }
-
   Ok(CardDefinition {
     card_type,
     card_category,
@@ -561,7 +533,7 @@ fn parse_card(
     name,
     style,
     aspects,
-    flags,
+    flags: 0,
   })
 }
 

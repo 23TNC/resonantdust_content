@@ -6,21 +6,15 @@
       "attack": {
         "name": "Attack",
         "style": ["#E67E7E", "#ecd6aa", "#0b1426"],
-        "aspects": { "combat": 3, "chaos": 1 },
-        "flags": []
-      },
+        "aspects": { "combat": 3, "chaos": 1 }      },
       "work": {
         "name": "Work",
         "style": ["#97e3a7", "#ecd6aa", "#0b1426"],
-        "aspects": { "labor": 3, "craft": 2, "order": 1 },
-        "flags": []
-      },
+        "aspects": { "labor": 3, "craft": 2, "order": 1 }      },
       "study": {
         "name": "Study",
         "style": ["#7D96E3", "#ecd6aa", "#0b1426"],
-        "aspects": { "mind": 3, "skill": 2, "order": 1 },
-        "flags": []
-      }
+        "aspects": { "mind": 3, "skill": 2, "order": 1 }      }
     }
   },
   {
@@ -30,39 +24,27 @@
       "corpus": {
         "name": "Corpus",
         "style": ["#E67E7E", "#ecd6aa", "#0b1426"],
-        "aspects": { "body": 3, "corpus": 3, "labor": 1 },
-        "flags": []
-      },
+        "aspects": { "body": 3, "corpus": 3, "labor": 1 }      },
       "aether": {
         "name": "Aether",
         "style": ["#7D96E3", "#ecd6aa", "#0b1426"],
-        "aspects": { "sollertia": 3, "skill": 3, "mind": 2, "craft": 1 },
-        "flags": []
-      },
+        "aspects": { "sollertia": 3, "skill": 3, "mind": 2, "craft": 1 }      },
       "sollertia": {
         "name": "Sollertia",
         "style": ["#97e3a7", "#ecd6aa", "#0b1426"],
-        "aspects": { "sollertia": 3, "skill": 3, "mind": 2, "craft": 1 },
-        "flags": []
-      },
+        "aspects": { "sollertia": 3, "skill": 3, "mind": 2, "craft": 1 }      },
       "anima": {
         "name": "Anima",
         "style": ["#FFD966", "#ecd6aa", "#0b1426"],
-        "aspects": { "anima": 3, "soul": 3, "body": 1 },
-        "flags": []
-      },
+        "aspects": { "anima": 3, "soul": 3, "body": 1 }      },
       "fatigue": {
         "name": "Fatigue",
         "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
-        "aspects": { "body": 1, "corpus": 1, "fleeting": 1 },
-        "flags": []
-      },
+        "aspects": { "body": 1, "corpus": 1, "fleeting": 1 }      },
       "vigor": {
         "name": "Vigor",
         "style": ["#E67E7E", "#ecd6aa", "#0b1426"],
-        "aspects": { "body": 2, "corpus": 2, "fleeting": 1 },
-        "flags": []
-      }
+        "aspects": { "body": 2, "corpus": 2, "fleeting": 1 }      }
     }
   },
   {
@@ -72,27 +54,21 @@
       "log": {
         "name": "Log",
         "style": ["#8B5E3C", "#ecd6aa", "#0b1426"],
-        "aspects": { "wood": 3, "fuel": 2, "craft": 1 },
-        "flags": []
-      }
+        "aspects": { "wood": 3, "fuel": 2, "craft": 1 }      },
+    "stone": {
+        "name": "Stone",
+        "style": ["#8A857C", "#ecd6aa", "#0b1426"],
+        "aspects": { "wood": 3, "fuel": 2, "craft": 1 }      }
     }
   },
   {
     "card_type": "revery",
     "category": "default",
     "cards": {
-      "soul": {
-        "name": "Soul",
-        "style": ["#a8e0e6", "#ecd6aa", "#0b1426"],
-        "aspects": { "soul": 2, "mind": 1, "memory": 1 },
-        "flags": []
-      },
       "dread": {
         "name": "Dread",
         "style": ["#3a3a4a", "#ecd6aa", "#0b1426"],
-        "aspects": { "dark": 2, "mind": 1, "soul": 1 },
-        "flags": []
-      }
+        "aspects": { "dark": 2, "mind": 1, "soul": 1 }      }
     }
   },
   {
@@ -102,9 +78,7 @@
       "human": {
         "name": "Human",
         "style": ["#a8e0e6", "#ecd6aa", "#0b1426"],
-        "aspects": { "mind": 2, "body": 2, "soul": 2, "skill": 1, "order": 1 },
-        "flags": []
-      }
+        "aspects": { "mind": 2, "body": 2, "soul": 2, "skill": 1, "order": 1 }      }
     }
   },
   {
@@ -114,15 +88,26 @@
       "plains": {
         "name": "Plains",
         "style": ["#799E50", "#0b1426", "#0b1426"],
-        "aspects": { "earth": 2, "food": 2, "labor": 1, "height": 20 },
-        "flags": []
-      },
+        "aspects": { "earth": 2, "food": 2, "labor": 1, "height": 20 }      },
       "forest": {
         "name": "Forest",
         "style": ["#395C39", "#7fb377", "#0b1426"],
-        "aspects": { "wood": 3, "earth": 2, "food": 1, "fuel": 1, "height": 16 },
-        "flags": []
-      }
+        "aspects": { "wood": 3, "earth": 2, "food": 1, "fuel": 1, "height": 16 }      },
+      "tree": {
+        "name": "Tree",
+        "style": ["#4A7C3A", "#3D2818", "#0b1426"],
+        "aspects": { "earth": 2, "food": 2, "labor": 1, "height": 20 }      },
+      "rock": {
+        "name": "Rock",
+        "style": ["#8A857C", "#2A2A2A", "#0b1426"],
+        "aspects": { "wood": 3, "earth": 2, "food": 1, "fuel": 1, "height": 16 }      }
+    }
+  },
+  {
+    "card_type": "tile_object",
+    "category": "default",
+    "cards": {
+      
     }
   },
   {
@@ -132,10 +117,7 @@
       "despair": {
         "name": "Despair",
         "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
-        "aspects": { "dark": 2, "mind": 1, "chaos": 1 },
-        "flags": ["drop_locked", "surface_locked", "magnetic"],
-        "magnetic_recipe": "despair"
-      }
+        "aspects": { "dark": 2, "mind": 1, "chaos": 1 }      }
     }
   }
 ]

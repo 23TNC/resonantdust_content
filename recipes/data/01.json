@@ -109,8 +109,9 @@
         },
         "magnetic_success": "magnetic.up.despair_success",
         "magnetic_failure": "magnetic.up.despair_failure",
-        "grace": 50,
         "duration": 60,
+        "delay": 10,
+        "interval": 2,
         "style": 1
       }
     ]
@@ -127,7 +128,7 @@
           "root": {"drop_hold": true, "position_hold": true} 
         },
         "output_success": { "inventory": { "hex": ["corpus"] } },
-        "duration": 5,
+        "duration": 10,
         "style": 1
       },
       {
@@ -136,7 +137,7 @@
         "reagents": ["hex"],
         "set_start": {},
         "output_success": { "inventory": { "hex": ["dread"] } },
-        "duration": 5,
+        "duration": 10,
         "style": 1
       }
     ],

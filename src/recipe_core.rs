@@ -102,12 +102,17 @@ pub enum RecipeType {
   OnCreateMagnetic,
   /// Inner recipes a magnetic ticker dispatches to. They live as
   /// top-level recipes under `type:"magnetic"` (with category
-  /// `success` or `failure`) and are referenced by id from the
-  /// `on_create/magnetic` outer's `magnetic_success` / `magnetic_failure`
-  /// fields. Inner recipes carry their own duration, slots, reagents,
-  /// and output — they're regular recipes, just lookup-only (never
-  /// matched directly against a chain).
-  Magnetic(MagneticOutcome),
+  /// `up` or `down` — the same direction convention as `Stack`,
+  /// describing how pulled cards stack on the anchor) and are
+  /// referenced by full `type.category.id` path from the
+  /// `on_create/magnetic` outer's `magnetic_success` /
+  /// `magnetic_failure` fields. Success vs. failure semantics are
+  /// determined by which slot of the outer points at this inner, not
+  /// by the bucket category — both branches of a single outer typically
+  /// share a direction. Inner recipes carry their own duration, slots,
+  /// reagents, and output; they're lookup-only (never matched directly
+  /// against a chain).
+  Magnetic(StackDirection),
 }
 
 /// Which way a stack recipe walks the chain from the submitted root.
@@ -121,30 +126,23 @@ pub enum StackDirection {
   Down,
 }
 
-/// Which branch of a magnetic outer's two id-referenced inner recipes
-/// this recipe lives under. See [`RecipeType::Magnetic`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MagneticOutcome {
-  Success,
-  Failure,
-}
-
 /// String-id references to the two inner recipes a magnetic outer
 /// (filed under `on_create/magnetic`) dispatches between. The outer
-/// names them via `magnetic_success` / `magnetic_failure` string id
-/// fields in the JSON; we resolve those names to stable `recipe_id`s
-/// in `build_recipes` after every recipe has been parsed, so refs can
-/// target recipes declared later in the file. The referenced recipes
-/// are full [`RecipeDef`]s in their own right (filed under
-/// `magnetic/{success,failure}`) and queryable via
-/// [`recipes_of_type`] / `recipe_by_id`.
+/// names them via `magnetic_success` / `magnetic_failure` fully-qualified
+/// path strings (`"<type>.<category>.<id>"`, e.g.
+/// `"magnetic.up.despair_success"`) in the JSON; we resolve those paths
+/// to stable `recipe_id`s in `build_recipes` after every recipe has been
+/// parsed, so refs can target recipes declared later in the file. The
+/// referenced recipes are full [`RecipeDef`]s in their own right (filed
+/// under `magnetic/{up,down}`) and queryable via [`recipes_of_type`] /
+/// `recipe_by_id`.
 #[derive(Debug, Clone, Copy)]
 pub struct MagneticRefs {
   /// Stable id of the success-branch inner recipe. Must resolve to a
-  /// recipe whose `recipe_type` is `Magnetic(Success)`.
+  /// recipe whose `recipe_type` is `Magnetic(_)`.
   pub success: u16,
   /// Stable id of the failure-branch inner recipe. Must resolve to a
-  /// recipe whose `recipe_type` is `Magnetic(Failure)`.
+  /// recipe whose `recipe_type` is `Magnetic(_)`.
   pub failure: u16,
 }
 
@@ -185,10 +183,19 @@ pub struct ProductTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProductPlace {
   /// A player's inventory panel. Combined with [`ProductOwner`] to
-  /// pick *which* player's panel. Today this is the only supported
-  /// place; world-tile and loose-world placements will land alongside
-  /// the world board.
+  /// pick *which* player's panel.
   Inventory,
+  /// A world-board tile. Combined with [`ProductOwner`] to pick
+  /// which tile coordinate. Today only `ProductOwner::Hex` is
+  /// supported — the product writes its def_id into the tile byte
+  /// at the action's `(macro_zone, micro_zone)`. Used together with
+  /// the synthetic-hex consumption path (a recipe with `hex` as a
+  /// reagent clears the tile; pairing a `location.hex` output
+  /// replaces it with a new def_id). Other [`ProductOwner`] variants
+  /// (`Root`, `Actor`, `RootOwner`, …) are reserved for future
+  /// "write a tile at the owner's location" flavors and currently
+  /// error at parse time.
+  Location,
 }
 
 /// Which action-relative referent the product is attached to. Each
@@ -371,6 +378,15 @@ pub struct RecipeDef {
   /// schedules a tick every `interval` seconds; each tick attempts
   /// one card pickup. Required for magnetic recipes.
   pub interval: Option<u32>,
+  /// Seconds between a magnetic action's commit decision and the inner
+  /// recipe's start. Buys a timing-drift buffer so the success / failure
+  /// row writes (released-with-holds rows on pulled cards) don't race
+  /// the inner recipe's `set_start`. Only meaningful when
+  /// `magnetic.is_some()`; ignored (and parser-rejected) otherwise.
+  /// Optional — `None` falls back to 0 at install time. Snapshotted into
+  /// `MagneticAction.delay_secs` so an in-flight magnetic doesn't change
+  /// behaviour mid-cycle if the value is ever made dynamic.
+  pub delay: Option<u32>,
   /// Flags to set on cards at the start of the action. For magnetic
   /// recipes, `hex` is applied to the anchor card when `magnetic::install`
   /// runs; `root` / `slot` are reserved for future outer-recipe use.
@@ -388,6 +404,7 @@ pub struct RecipeDef {
 
 const RECIPES_FILES: &[(&str, &str)] = &[
   ("recipes/data/01.json", include_str!("../recipes/data/01.json")),
+  ("recipes/data/02.json", include_str!("../recipes/data/02.json")),
 ];
 const RECIPE_IDS_JSON: &str = include_str!("../recipes/id.json");
 const RECIPE_TYPES_JSON: &str = include_str!("../recipes/types.json");
@@ -697,6 +714,53 @@ fn recipe_type_pair(rt: RecipeType) -> Result<(u8, u8), String> {
   Ok((type_id, category_id))
 }
 
+/// Resolve a magnetic outer's `magnetic_success` / `magnetic_failure`
+/// path ref ("<type>.<category>.<id>", e.g. "magnetic.up.despair_success")
+/// to a packed stable recipe id. Validates the path's prefix against the
+/// resolved recipe's actual filing so a typo'd category can't silently
+/// dispatch to the wrong inner.
+///
+/// `field` is the JSON key ("magnetic_success" / "magnetic_failure"),
+/// used purely for the error message.
+fn resolve_magnetic_path(
+  path: &str,
+  field: &str,
+  outer_id: u16,
+  filename: &str,
+  id_by_name: &BTreeMap<String, u16>,
+  by_id: &BTreeMap<u16, RecipeDef>,
+) -> Result<u16, String> {
+  let parts: Vec<&str> = path.split('.').collect();
+  if parts.len() != 3 {
+    return Err(format!(
+      "{}: magnetic outer recipe (stable_id={}) {} {:?} not a 'type.category.id' path",
+      filename, outer_id, field, path
+    ));
+  }
+  let (path_type, path_category, leaf) = (parts[0], parts[1], parts[2]);
+  let resolved = *id_by_name.get(leaf).ok_or_else(|| {
+    format!(
+      "{}: magnetic outer recipe (stable_id={}) references unknown {} {:?} (leaf id {:?} not found)",
+      filename, outer_id, field, path, leaf
+    )
+  })?;
+  let def = by_id.get(&resolved).expect("id_by_name and by_id share keys");
+  if !matches!(def.recipe_type, RecipeType::Magnetic(_)) {
+    return Err(format!(
+      "{}: magnetic outer recipe (stable_id={}) {} {:?} resolved to a non-magnetic recipe (got {:?})",
+      filename, outer_id, field, path, def.recipe_type
+    ));
+  }
+  let (actual_type, actual_category) = recipe_type_names(def.recipe_type);
+  if path_type != actual_type || path_category != actual_category {
+    return Err(format!(
+      "{}: magnetic outer recipe (stable_id={}) {} {:?} prefix mismatch — leaf {:?} is filed under {:?}.{:?}",
+      filename, outer_id, field, path, leaf, actual_type, actual_category
+    ));
+  }
+  Ok(resolved)
+}
+
 /// JSON-side names of a `RecipeType` variant — the bucket type and
 /// direction key it was declared under.
 fn recipe_type_names(rt: RecipeType) -> (&'static str, &'static str) {
@@ -705,8 +769,8 @@ fn recipe_type_names(rt: RecipeType) -> (&'static str, &'static str) {
     RecipeType::Stack(StackDirection::Down) => ("stack", "down"),
     RecipeType::OnCreate => ("on_create", "self"),
     RecipeType::OnCreateMagnetic => ("on_create", "magnetic"),
-    RecipeType::Magnetic(MagneticOutcome::Success) => ("magnetic", "success"),
-    RecipeType::Magnetic(MagneticOutcome::Failure) => ("magnetic", "failure"),
+    RecipeType::Magnetic(StackDirection::Up) => ("magnetic", "up"),
+    RecipeType::Magnetic(StackDirection::Down) => ("magnetic", "down"),
   }
 }
 
@@ -876,8 +940,8 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
           ("magnetic", RecipeType::OnCreateMagnetic),
         ],
         "magnetic" => &[
-          ("success", RecipeType::Magnetic(MagneticOutcome::Success)),
-          ("failure", RecipeType::Magnetic(MagneticOutcome::Failure)),
+          ("up", RecipeType::Magnetic(StackDirection::Up)),
+          ("down", RecipeType::Magnetic(StackDirection::Down)),
         ],
         other => {
           return Err(format!(
@@ -918,38 +982,21 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
   }
 
   // Second pass: resolve magnetic outers' `magnetic_success` /
-  // `magnetic_failure` string refs to stable recipe ids and patch them
-  // into the corresponding `RecipeDef.magnetic` fields. Done after the
-  // main loop so refs can target recipes declared later in the file.
-  // Also enforces that each ref points at a recipe of the correct
-  // category (`magnetic/success` and `magnetic/failure` respectively).
-  for (outer_id, succ_name, fail_name, filename) in pending_magnetic {
-    let success = *id_by_name.get(&succ_name).ok_or_else(|| {
-      format!(
-        "{}: magnetic outer recipe (stable_id={}) references unknown magnetic_success {:?}",
-        filename, outer_id, succ_name
-      )
-    })?;
-    let failure = *id_by_name.get(&fail_name).ok_or_else(|| {
-      format!(
-        "{}: magnetic outer recipe (stable_id={}) references unknown magnetic_failure {:?}",
-        filename, outer_id, fail_name
-      )
-    })?;
-    let succ_def = by_id.get(&success).expect("id_by_name and by_id share keys");
-    if succ_def.recipe_type != RecipeType::Magnetic(MagneticOutcome::Success) {
-      return Err(format!(
-        "{}: magnetic_success {:?} must be filed under magnetic/success (got {:?})",
-        filename, succ_name, succ_def.recipe_type
-      ));
-    }
-    let fail_def = by_id.get(&failure).expect("id_by_name and by_id share keys");
-    if fail_def.recipe_type != RecipeType::Magnetic(MagneticOutcome::Failure) {
-      return Err(format!(
-        "{}: magnetic_failure {:?} must be filed under magnetic/failure (got {:?})",
-        filename, fail_name, fail_def.recipe_type
-      ));
-    }
+  // `magnetic_failure` fully-qualified path refs ("<type>.<category>.<id>")
+  // to stable recipe ids and patch them into the corresponding
+  // `RecipeDef.magnetic` fields. Done after the main loop so refs can
+  // target recipes declared later in the file. Validates that:
+  //   1. The path parses cleanly into three dot-separated parts.
+  //   2. The leaf id resolves in `id_by_name`.
+  //   3. The resolved recipe's `recipe_type` is `Magnetic(_)`.
+  //   4. The path's `<type>.<category>` prefix matches the resolved
+  //      recipe's actual filing (catches typos like
+  //      "magnetic.down.foo" when `foo` is filed under `up`).
+  for (outer_id, succ_path, fail_path, filename) in pending_magnetic {
+    let success =
+      resolve_magnetic_path(&succ_path, "magnetic_success", outer_id, filename, &id_by_name, &by_id)?;
+    let failure =
+      resolve_magnetic_path(&fail_path, "magnetic_failure", outer_id, filename, &id_by_name, &by_id)?;
     if let Some(def) = by_id.get_mut(&outer_id) {
       def.magnetic = Some(MagneticRefs { success, failure });
     }
@@ -1060,6 +1107,33 @@ fn parse_recipe(
   if recipe_type != RecipeType::OnCreateMagnetic && interval.is_some() {
     return Err(format!(
       "{}: non-magnetic recipe {:?} has 'interval' field — only on_create/magnetic outers use it",
+      filename, id
+    ));
+  }
+
+  // `delay` (seconds) — same scope rules as `interval`: only magnetic
+  // outers may declare it. Drives the gap between the magnetic_action's
+  // commit decision and the inner recipe's set_start.
+  let delay = match recipe_value.get("delay") {
+    Some(v) => {
+      let n = v.as_u64().ok_or_else(|| {
+        format!(
+          "{}: recipe {:?} 'delay' not a non-negative integer: {:?}",
+          filename, id, v
+        )
+      })?;
+      Some(u32::try_from(n).map_err(|_| {
+        format!(
+          "{}: recipe {:?} 'delay' value {} exceeds u32 range",
+          filename, id, n
+        )
+      })?)
+    }
+    None => None,
+  };
+  if recipe_type != RecipeType::OnCreateMagnetic && delay.is_some() {
+    return Err(format!(
+      "{}: non-magnetic recipe {:?} has 'delay' field — only on_create/magnetic outers use it",
       filename, id
     ));
   }
@@ -1179,6 +1253,7 @@ fn parse_recipe(
     // `MagneticRefs` patched in once every recipe id is known.
     magnetic: None,
     interval,
+    delay,
     set_start,
     style,
   };
@@ -1289,9 +1364,10 @@ fn parse_output_groups(
   for (place_name, place_value) in obj {
     let place = match place_name.as_str() {
       "inventory" => ProductPlace::Inventory,
+      "location" => ProductPlace::Location,
       other => {
         return Err(format!(
-          "{}: recipe {:?}{} unknown product place {:?} under {}, expected \"inventory\"",
+          "{}: recipe {:?}{} unknown product place {:?} under {}, expected \"inventory\" or \"location\"",
           filename, id_label, where_str, other, key
         ));
       }
@@ -1315,6 +1391,18 @@ fn parse_output_groups(
           ));
         }
       };
+      // For `location` outputs, only `hex` owner is implemented today.
+      // Other owner variants are reserved for "write a tile at the
+      // root's location" / "...actor's location" etc., which need
+      // additional address plumbing through action_completion. Reject
+      // at parse time so content authors get the error immediately
+      // rather than at runtime.
+      if place == ProductPlace::Location && owner != ProductOwner::Hex {
+        return Err(format!(
+          "{}: recipe {:?}{} {}[location][{}]: only `hex` owner is supported for location outputs today",
+          filename, id_label, where_str, key, owner_name
+        ));
+      }
       let entities_arr = entities_value.as_array().ok_or_else(|| {
         format!(
           "{}: recipe {:?}{} {}[{}][{}] not an array",
