@@ -2,15 +2,18 @@
   "magnetic": {
     "up": {
       "despair_success": 1,
-      "despair_failure": 2
+      "despair_failure": 2,
+      "strike_success": 3,
+      "strike_failure": 4
     }
   },
   "on_create": {
     "magnetic": {
-      "despair": 1
+      "despair": 1,
+      "strike": 2
     },
     "self": {
-      "fatigue": 1,
+      "corpus-": 1,
       "fleeting": 2
     }
   },

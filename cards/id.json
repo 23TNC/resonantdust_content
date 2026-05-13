@@ -1,24 +1,24 @@
 {
-  "discipline": {
-    "default": {
-      "attack": 1,
-      "work": 2,
-      "study": 3
-    }
-  },
   "event": {
     "default": {
-      "despair": 1
+      "despair": 1,
+      "strike": 2
     }
   },
   "faculty": {
     "default": {
       "corpus": 1,
-      "aether": 2,
-      "sollertia": 3,
-      "anima": 4,
-      "fatigue": 5,
-      "vigor": 6
+      "corpus-": 2,
+      "corpus+": 3,
+      "aether": 4,
+      "aether-": 5,
+      "aether+": 6,
+      "sollertia": 7,
+      "sollertia-": 8,
+      "sollertia+": 9,
+      "anima": 10,
+      "anima-": 11,
+      "anima+": 12
     }
   },
   "requisite": {
@@ -39,8 +39,8 @@
   },
   "tile": {
     "default": {
-      "plains": 1,
-      "forest": 2,
+      "forest_1": 1,
+      "forest_2": 2,
       "tree": 3,
       "rock": 4
     }

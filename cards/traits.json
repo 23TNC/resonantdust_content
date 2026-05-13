@@ -1,0 +1,7 @@
+{
+  "_comment": "Trait catalog — descriptive labels placed on cards alongside their aspect contribution. Mirrors aspects.json: top-level groups, each group holds `trait_name: description` string pairs. Trait IDs are 1-indexed in JSON insertion order across all groups (id 0 reserved as `TRAIT_NONE`). Append-only — once a trait name is assigned, never rename it; remove a trait by deleting its line and leaving a `_reserved_<name>` tombstone if downstream wire compatibility ever matters.",
+
+  "general": {
+    "_comment": "Placeholder group. Replace with real categories (e.g. `growth`, `behavior`, `combat`) as traits are introduced."
+  }
+}

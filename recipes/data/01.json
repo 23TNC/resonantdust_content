@@ -30,7 +30,7 @@
             ["corpus"]
         ],
         "reagents": [1],
-        "output_success": { "inventory": { "root": ["fatigue"] } },
+        "output_success": { "inventory": { "root": ["corpus-"] } },
         "duration": 10,
         "style": 2
       },
@@ -43,7 +43,7 @@
         "reagents": [1],
         "output_success": {
           "inventory": {
-            "root": ["fatigue"],
+            "root": ["corpus-"],
             "actor": [["log", [4, 1], "vigor"]]
           }
         },
@@ -79,8 +79,8 @@
     "type": "on_create",
     "self": [
       {
-        "id": "fatigue",
-        "root": ["fatigue"],
+        "id": "corpus-",
+        "root": ["corpus-"],
         "reagents": ["root"],
         "output_success": { "inventory": { "actor": ["corpus"] } },
         "duration": 30,
@@ -113,6 +113,19 @@
         "delay": 10,
         "interval": 2,
         "style": 1
+      },
+      {
+        "id": "strike",
+        "hex": ["strike"],
+        "set_start": { 
+          "hex": {"drop_locked": true, "surface_locked": true} 
+        },
+        "magnetic_success": "magnetic.up.strike_success",
+        "magnetic_failure": "magnetic.up.strike_failure",
+        "duration": 60,
+        "delay": 10,
+        "interval": 2,
+        "style": 1
       }
     ]
   },
@@ -134,6 +147,27 @@
       {
         "id": "despair_failure",
         "hex": ["despair"],
+        "reagents": ["hex"],
+        "set_start": {},
+        "output_success": { "inventory": { "hex": ["dread"] } },
+        "duration": 10,
+        "style": 1
+      },
+      {
+        "id": "strike_success",
+        "hex": ["strike"],
+        "slots": ["corpus", "corpus", "corpus"],
+        "reagents": ["hex", 1, 2, 3],
+        "set_start": {
+          "root": {"drop_hold": true, "position_hold": true} 
+        },
+        "output_success": { "inventory": { "root": ["corpus-", "corpus-", "corpus-"] } },
+        "duration": 10,
+        "style": 1
+      },
+      {
+        "id": "strike_failure",
+        "hex": ["strike"],
         "reagents": ["hex"],
         "set_start": {},
         "output_success": { "inventory": { "hex": ["dread"] } },

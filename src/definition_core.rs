@@ -15,7 +15,8 @@
 //! - `cards/data/*.json` — per-file arrays of buckets, each bucket pinning a
 //!   `card_type` + `category` and listing its cards as
 //!   `{ key: { "name": str, "style": [c0, c1, c2],
-//!             "aspects": { aspect_name: value, ... } } }`.
+//!             "aspects": { aspect_name: value, ... },
+//!             "traits":  { trait_name:  value, ... } } }`.
 //!
 //! Card aspect names are translated to `AspectId`s at registry-build time;
 //! `CardDefinition.aspects` carries `(AspectId, i32)` pairs for fast runtime
@@ -36,13 +37,17 @@
 //!
 //! # Paths
 //!
-//! Files are embedded with `include_str!` at compile time, relative to this
-//! source file at `content/src/definition_core.rs`. JSON catalogs live one
-//! directory up under `content/cards/`, so paths like `../cards/aspects.json`
-//! resolve to `content/cards/aspects.json`.
+//! Singleton JSON catalogs (`aspects.json`, `cards/types.json`,
+//! `cards/id.json`) are embedded directly with `include_str!`. The
+//! per-file card buckets under `cards/data/*.json` are discovered at
+//! compile time by `build.rs` and exposed as
+//! [`crate::embedded_data::CARDS_FILES`]. Adding / renaming / removing
+//! a file in `cards/data/` needs no source edit — cargo re-runs the
+//! build script and the slice picks the change up.
 //!
-//! Adding a new `cards/data/NN.json` file requires appending an entry to
-//! `CARDS_FILES` below.
+//! Each `cards/data/*.json` may be either a top-level array of buckets
+//! or a single bare bucket object. Both shapes get normalised to a
+//! bucket list inside [`build_cards`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -160,6 +165,115 @@ fn build_aspects() -> Result<AspectRegistry, String> {
   Ok(AspectRegistry { by_id, id_by_name })
 }
 
+// ---------- Traits ----------
+
+pub type TraitId = u8;
+
+/// Sentinel id meaning "no trait" / "unknown trait". Trait IDs are
+/// 1-indexed, matching the aspect convention.
+pub const TRAIT_NONE: TraitId = 0;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Trait {
+  pub id: TraitId,
+  /// Programmatic name from the JSON.
+  pub name: String,
+  /// Human-readable description from the JSON.
+  pub description: String,
+  /// Group the trait was declared under, e.g. `"general"`.
+  pub group: String,
+}
+
+struct TraitRegistry {
+  by_id: Vec<Trait>,                       // index by (id - 1)
+  id_by_name: BTreeMap<String, TraitId>,
+}
+
+const TRAITS_JSON: &str = include_str!("../cards/traits.json");
+static TRAITS: OnceLock<Result<TraitRegistry, String>> = OnceLock::new();
+
+fn traits_registry() -> Result<&'static TraitRegistry, String> {
+  TRAITS.get_or_init(build_traits).as_ref().map_err(|e| e.clone())
+}
+
+/// Look up a trait's id by name. Returns `Ok(None)` if the registry built
+/// successfully but no trait with that name is declared, `Err` if the
+/// trait registry failed to build.
+pub fn trait_id(name: &str) -> Result<Option<TraitId>, String> {
+  Ok(traits_registry()?.id_by_name.get(name).copied())
+}
+
+/// Resolve a `TraitId` back to the full `Trait` record. `Ok(None)` for
+/// `TRAIT_NONE` and for ids past the end of the registry; `Err` on
+/// registry-build failure. Named `trait_def` rather than `trait` because
+/// `trait` is a Rust keyword.
+pub fn trait_def(id: TraitId) -> Result<Option<&'static Trait>, String> {
+  if id == TRAIT_NONE {
+    return Ok(None);
+  }
+  Ok(traits_registry()?.by_id.get((id - 1) as usize))
+}
+
+/// All known traits, ordered by id. `Err` on registry-build failure.
+pub fn traits() -> Result<&'static [Trait], String> {
+  Ok(&traits_registry()?.by_id)
+}
+
+fn build_traits() -> Result<TraitRegistry, String> {
+  let root: Value = serde_json::from_str(TRAITS_JSON)
+    .map_err(|e| format!("traits.json: parse failed: {}", e))?;
+  let root = root
+    .as_object()
+    .ok_or_else(|| "traits.json: top-level not an object".to_string())?;
+
+  let mut by_id: Vec<Trait> = Vec::new();
+  let mut id_by_name: BTreeMap<String, TraitId> = BTreeMap::new();
+  let mut next_id: u32 = 1;
+
+  for (group_name, group_value) in root {
+    if group_name.starts_with('_') {
+      continue;
+    }
+    let group_obj = group_value.as_object().ok_or_else(|| {
+      format!("traits.json: group {:?} not an object", group_name)
+    })?;
+
+    for (trait_name, desc_value) in group_obj {
+      if trait_name.starts_with('_') {
+        continue;
+      }
+      if next_id > TraitId::MAX as u32 {
+        return Err(format!(
+          "traits.json: more than {} traits (id overflow)",
+          TraitId::MAX,
+        ));
+      }
+      let id = next_id as TraitId;
+      next_id += 1;
+
+      let description = desc_value
+        .as_str()
+        .ok_or_else(|| {
+          format!(
+            "traits.json: trait {}/{} description not a string",
+            group_name, trait_name
+          )
+        })?
+        .to_string();
+
+      by_id.push(Trait {
+        id,
+        name: trait_name.clone(),
+        description,
+        group: group_name.clone(),
+      });
+      id_by_name.insert(trait_name.clone(), id);
+    }
+  }
+
+  Ok(TraitRegistry { by_id, id_by_name })
+}
+
 // ---------- Cards ----------
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -181,6 +295,11 @@ pub struct CardDefinition {
   /// stored registry-build error. Each `aspect_id` appears at most once
   /// per definition.
   pub aspects: Vec<(AspectId, i32)>,
+  /// `(trait_id, value)` pairs. Same shape as `aspects` but resolved
+  /// against `traits.json` via `trait_id`. Empty for cards that don't
+  /// declare any traits yet (the JSON requires the field to be present
+  /// as an object, but `{}` is valid).
+  pub traits: Vec<(TraitId, i32)>,
   /// Bit-mask of flags applied to every card spawned with this
   /// definition. Currently always 0 — per-definition flag presets are
   /// not declared in card JSON. Kept on the struct because
@@ -198,12 +317,7 @@ const CARD_IDS_JSON: &str = include_str!("../cards/id.json");
 /// `u4` halves of `packed_definition`, so 0xF is the hard cap.
 const MAX_TYPE_OR_CATEGORY_ID: u64 = 0xF;
 
-/// Every cards/data/*.json file compiled into the registry. Append a tuple here
-/// when adding a new card data file. The filename is kept alongside the
-/// content for clearer error messages on parse failure.
-const CARDS_FILES: &[(&str, &str)] = &[
-  ("cards/data/01.json", include_str!("../cards/data/01.json")),
-];
+use crate::embedded_data::CARDS_FILES;
 
 struct CardRegistry {
   by_packed: BTreeMap<u16, CardDefinition>,
@@ -343,11 +457,25 @@ fn build_cards() -> Result<CardRegistry, String> {
   let mut by_key: BTreeMap<String, u16> = BTreeMap::new();
 
   for (filename, content) in CARDS_FILES {
-    let buckets: Value = serde_json::from_str(content)
+    let parsed: Value = serde_json::from_str(content)
       .map_err(|e| format!("{}: parse failed: {}", filename, e))?;
-    let buckets = buckets
-      .as_array()
-      .ok_or_else(|| format!("{}: top-level not an array", filename))?;
+    // Accept either an array of buckets or a single bare bucket object —
+    // both shapes are normalised to a slice so the loop body stays the
+    // same.
+    let owned_singleton;
+    let buckets: &[Value] = match &parsed {
+      Value::Array(v) => v.as_slice(),
+      Value::Object(_) => {
+        owned_singleton = [parsed.clone()];
+        &owned_singleton
+      }
+      _ => {
+        return Err(format!(
+          "{}: top-level must be a bucket object or an array of buckets",
+          filename
+        ));
+      }
+    };
 
     for bucket in buckets {
       let type_name = bucket["card_type"]
@@ -525,6 +653,35 @@ fn parse_card(
     aspects.push((id, aspect_value));
   }
 
+  let traits_obj = obj
+    .get("traits")
+    .and_then(Value::as_object)
+    .ok_or_else(|| format!("{}: card {}: missing or non-object 'traits'", filename, key))?;
+
+  let mut traits: Vec<(TraitId, i32)> = Vec::with_capacity(traits_obj.len());
+  let mut seen_trait_ids: BTreeSet<TraitId> = BTreeSet::new();
+  for (trait_name, trait_val) in traits_obj.iter() {
+    let id = trait_id(trait_name)?.ok_or_else(|| {
+      format!(
+        "{}: card {}: unknown trait {:?} (not declared in traits.json)",
+        filename, key, trait_name
+      )
+    })?;
+    if !seen_trait_ids.insert(id) {
+      return Err(format!(
+        "{}: card {}: trait {:?} listed more than once",
+        filename, key, trait_name
+      ));
+    }
+    let trait_value = trait_val.as_i64().ok_or_else(|| {
+      format!(
+        "{}: card {}: trait {:?} value not an integer",
+        filename, key, trait_name
+      )
+    })? as i32;
+    traits.push((id, trait_value));
+  }
+
   Ok(CardDefinition {
     card_type,
     card_category,
@@ -533,6 +690,7 @@ fn parse_card(
     name,
     style,
     aspects,
+    traits,
     flags: 0,
   })
 }

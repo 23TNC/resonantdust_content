@@ -28,3 +28,12 @@ pub mod flags_core;
 
 #[cfg(feature = "js")]
 mod wasm_api;
+
+/// `(rel_path, contents)` slices for every `*.json` under `cards/data/` and
+/// `recipes/data/`, populated at compile time by `build.rs`. The registries
+/// iterate these instead of hard-coding filenames, so adding / removing /
+/// renaming a data file needs no source edit — cargo notices via the
+/// build script's `rerun-if-changed` hooks and the slice regenerates.
+mod embedded_data {
+  include!(concat!(env!("OUT_DIR"), "/data_files.rs"));
+}

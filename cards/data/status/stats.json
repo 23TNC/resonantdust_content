@@ -1,0 +1,81 @@
+{
+  "card_type": "faculty",
+  "category": "default",
+  "cards": {
+    "corpus": {
+      "name": "Corpus",
+      "style": ["#E67E7E", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "corpus-": {
+      "name": "Corpus",
+      "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "corpus+": {
+      "name": "Vigor",
+      "style": ["#E67E7E", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+
+    "aether": {
+      "name": "Aether",
+      "style": ["#7D96E3", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "aether-": {
+      "name": "Aether",
+      "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "aether+": {
+      "name": "Attune",
+      "style": ["#7D96E3", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+
+    "sollertia": {
+      "name": "Sollertia",
+      "style": ["#97e3a7", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "sollertia-": {
+      "name": "Sollertia",
+      "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "sollertia+": {
+      "name": "Mastery",
+      "style": ["#97e3a7", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+
+    "anima": {
+      "name": "Anima",
+      "style": ["#FFD966", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "anima-": {
+      "name": "Anima",
+      "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    },
+    "anima+": {
+      "name": "Resolve",
+      "style": ["#FFD966", "#ecd6aa", "#0b1426"],
+      "aspects": {},
+      "traits": {}
+    }
+  }
+}

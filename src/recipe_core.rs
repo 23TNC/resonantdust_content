@@ -237,36 +237,67 @@ pub struct ProductGroup {
 
 /// Flags to set on specific cards when a magnetic action pulls them
 /// at the start of an inner recipe, or on the anchor card when a
-/// magnetic action is first installed. Field values are bitmasks built
-/// from the named-flag arrays in the JSON `"set_start"` key. Zero
-/// means "set nothing on that card role."
+/// Set-and-clear bitmask pair for a single card role. Each flag named
+/// under a `set_start` sub-key (`root` / `slot` / `hex`) carries a
+/// boolean: `true` lands in `set_mask`, `false` lands in `clear_mask`,
+/// omitted flags appear in neither. Apply via [`FlagOps::apply`]:
+/// clear bits first, then set bits, so the recipe author's `true`
+/// always wins over their own `false` if both somehow named the same
+/// flag (which the parser doesn't currently allow per-key anyway,
+/// but the masking discipline is the same).
 ///
-/// The clearing counterpart is always `position_hold + drop_hold`
-/// (the two temporary-hold bits) and is not controlled by this struct.
-/// Locked variants (`position_locked`, `drop_locked`) set via
-/// `set_start` persist until explicitly cleared by admin/migration code.
+/// Replaces the prior "single OR mask per role" form so recipes can
+/// *release* flags at start time as well as set them — e.g.,
+/// `set_start.root.slot_hold = false` to drop the auto-set slot_hold
+/// the chain-stitching code would otherwise leave on the root.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FlagOps {
+  /// Bits to OR onto the card's `flags` (force-on).
+  pub set_mask: u8,
+  /// Bits to AND-out of the card's `flags` (force-off).
+  pub clear_mask: u8,
+}
+
+impl FlagOps {
+  /// Apply this op to a `flags` u32: clear `clear_mask` bits, then OR
+  /// `set_mask` bits. Mask values widen from `u8` to `u32` to match
+  /// `Card.flags`; future flag bits past index 7 will need the masks
+  /// widened too (and the parser updated to know about them).
+  pub fn apply(self, flags: u32) -> u32 {
+    (flags & !(self.clear_mask as u32)) | (self.set_mask as u32)
+  }
+}
+
+/// Flag deltas to apply when an action starts — root, slot, hex.
+/// Magnetic outers apply the `hex` ops onto the anchor card at install
+/// time. Stack and on_create recipes apply all three at chain stitch
+/// time, scoped to whichever roles the recipe declared. Empty / all-
+/// zero ops are no-ops.
 ///
-/// JSON form under an inner recipe:
+/// JSON form:
 /// ```json
 /// "set_start": {
-///   "root": ["position_hold", "drop_hold"],
-///   "slot": ["position_hold", "drop_hold"],
-///   "hex":  []
+///   "root": {"position_hold": true, "slot_hold": false},
+///   "slot": {"drop_hold": true},
+///   "hex":  {"drop_locked": true, "surface_locked": true}
 /// }
 /// ```
-/// Under an outer recipe the `hex` key sets flags on the anchor card at
-/// install time; `root` / `slot` are parsed but unused at that point.
-#[derive(Debug, Clone, Default)]
+/// `true` forces the flag on; `false` forces it off; omitted flags are
+/// left untouched. Recipe author's `set_start` is the *last* thing
+/// applied at each consumer site, so it overrides server defaults
+/// (e.g. the auto-set `slot_hold` on slot fillers).
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SetStartFlags {
-  /// Bitmask ORed onto the root card (root-based inners: the card
-  /// placed as a child of the anchor; outer recipe: the anchor).
-  pub root: u8,
-  /// Bitmask ORed onto each slot card (slot-based inners: cards pulled
+  /// Ops applied to the root card (root-based inners: the card placed
+  /// as a child of the anchor; outer recipe: the anchor).
+  pub root: FlagOps,
+  /// Ops applied to each slot card (slot-based inners: cards pulled
   /// from inventory into numbered slot positions).
-  pub slot: u8,
-  /// Bitmask ORed onto the hex anchor card (outer recipe: applied at
-  /// install; inner recipe: parsed but not yet applied).
-  pub hex: u8,
+  pub slot: FlagOps,
+  /// Ops applied to the hex anchor card (outer recipe: applied at
+  /// install; inner recipe: parsed but not yet applied — would land
+  /// on the anchor at commit if a use case appears).
+  pub hex: FlagOps,
 }
 
 /// What a recipe consumes on completion. Three kinds, all optional:
@@ -402,10 +433,8 @@ pub struct RecipeDef {
   pub style: u8,
 }
 
-const RECIPES_FILES: &[(&str, &str)] = &[
-  ("recipes/data/01.json", include_str!("../recipes/data/01.json")),
-  ("recipes/data/02.json", include_str!("../recipes/data/02.json")),
-];
+use crate::embedded_data::RECIPES_FILES;
+
 const RECIPE_IDS_JSON: &str = include_str!("../recipes/id.json");
 const RECIPE_TYPES_JSON: &str = include_str!("../recipes/types.json");
 
@@ -916,9 +945,22 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
   for (filename, content) in RECIPES_FILES {
     let buckets_value: Value = serde_json::from_str(content)
       .map_err(|e| format!("{}: parse failed: {}", filename, e))?;
-    let buckets = buckets_value
-      .as_array()
-      .ok_or_else(|| format!("{}: top-level not an array of buckets", filename))?;
+    // Accept either an array of buckets or a single bare bucket object;
+    // both shapes are normalised to a slice.
+    let owned_singleton;
+    let buckets: &[Value] = match &buckets_value {
+      Value::Array(v) => v.as_slice(),
+      Value::Object(_) => {
+        owned_singleton = [buckets_value.clone()];
+        &owned_singleton
+      }
+      _ => {
+        return Err(format!(
+          "{}: top-level must be a bucket object or an array of buckets",
+          filename
+        ));
+      }
+    };
 
     for bucket in buckets {
       let bucket_type = bucket
@@ -1289,7 +1331,7 @@ fn parse_set_start(
         filename, id_label, where_str, sub_key
       )
     })?;
-    let mut mask: u8 = 0;
+    let mut ops = FlagOps::default();
     for (name, bit_val) in bits_obj {
       let set = bit_val.as_bool().ok_or_else(|| {
         format!(
@@ -1297,12 +1339,16 @@ fn parse_set_start(
           filename, id_label, where_str, sub_key, name
         )
       })?;
+      // Bit positions mirror `content/cards/flags.json`. Append-only;
+      // never reorder. New flags that authors should be able to drive
+      // from JSON land here as additional match arms.
       let bit: u8 = match name.as_str() {
         "position_hold"   => 0,
         "position_locked" => 1,
         "surface_locked"  => 2,
         "drop_hold"       => 3,
         "drop_locked"     => 4,
+        "slot_hold"       => 5,
         "dead" => {
           return Err(format!(
             "{}: recipe {:?}{} set_start.{}.{}: 'dead' cannot be set via set_start",
@@ -1313,19 +1359,24 @@ fn parse_set_start(
           return Err(format!(
             "{}: recipe {:?}{} set_start.{}.{}: unknown flag name {:?} \
              (expected \"position_hold\", \"position_locked\", \"surface_locked\", \
-             \"drop_hold\", \"drop_locked\")",
+             \"drop_hold\", \"drop_locked\", \"slot_hold\")",
             filename, id_label, where_str, sub_key, name, other
           ));
         }
       };
+      // `true` → force the bit on (set_mask). `false` → force it off
+      // (clear_mask). Setting both for the same bit is impossible here
+      // since each flag name appears at most once in the JSON object.
       if set {
-        mask |= 1u8 << bit;
+        ops.set_mask |= 1u8 << bit;
+      } else {
+        ops.clear_mask |= 1u8 << bit;
       }
     }
     match sub_key.as_str() {
-      "root" => flags.root = mask,
-      "slot" => flags.slot = mask,
-      "hex"  => flags.hex  = mask,
+      "root" => flags.root = ops,
+      "slot" => flags.slot = ops,
+      "hex"  => flags.hex  = ops,
       other => {
         return Err(format!(
           "{}: recipe {:?}{} set_start unknown sub-key {:?} \

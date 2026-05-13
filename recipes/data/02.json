@@ -9,7 +9,7 @@
             ["corpus"]
         ],
         "reagents": ["hex", 1],
-        "output_success": { "inventory": { "actor": ["fatigue", "log"] } },
+        "output_success": { "inventory": { "actor": ["corpus-", "log"] } },
         "duration": 10,
         "style": 2
       },
@@ -20,7 +20,7 @@
             ["corpus"]
         ],
         "reagents": ["hex", 1],
-        "output_success": { "inventory": { "actor": ["fatigue", "stone"] } },
+        "output_success": { "inventory": { "actor": ["corpus-", "stone"] } },
         "duration": 10,
         "style": 2
       }
