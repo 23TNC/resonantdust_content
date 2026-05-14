@@ -323,6 +323,61 @@ pub enum Reagent {
   Slot(u8),
 }
 
+/// Per-owner-role predicate lists that check the *top stack* of a
+/// player's soul card. Each entry is a slot that must be filled by a
+/// card in the relevant owner's soul stack — used to gate recipes on
+/// player capability (equipment, traits, etc.) without consuming the
+/// cards.
+///
+/// `root` checks the soul of `root.owner_id`; `actor` checks the
+/// soul of the actor's owner. Both lists are positional: duplicates
+/// mean "I need N of these," and each entry independently binds to a
+/// distinct card in the stack.
+///
+/// JSON form (under `"has"` and `"reagents.has"`):
+/// ```json
+/// "has": {
+///   "root":  [["shield"]],
+///   "actor": [["axe"], ["scroll"]]
+/// }
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct HasOps {
+  pub root: Vec<Entity>,
+  pub actor: Vec<Entity>,
+}
+
+/// Recipe consumption spec — what cards die at completion. Replaces
+/// the prior flat `Vec<Reagent>` so authors can additionally specify
+/// has-stack consumption (equipment that gets used up).
+///
+/// JSON form:
+/// ```json
+/// "reagents": ["hex", "root", 1, 2]
+/// ```
+/// (flat — equivalent to `{ "slots": ["hex", "root", 1, 2] }`)
+/// or the structured form for has-consumption:
+/// ```json
+/// "reagents": {
+///   "slots":     ["hex", "root", 1, 2],
+///   "has":       { "actor": [["scroll"]] },
+///   "has_below": { "actor": [["fatigue"]] }
+/// }
+/// ```
+///
+/// `slots` consumes by the role names / 1-indexed slot positions
+/// `Reagent` already supports. `has` consumes from the actor's /
+/// root's soul-stack matches (UP direction = equipment) resolved at
+/// proposal time. `has_below` consumes from the DOWN-direction stack
+/// of the same soul (action stack / debuff stack) — same match shape,
+/// different stack direction.
+#[derive(Debug, Clone, Default)]
+pub struct Reagents {
+  pub slots: Vec<Reagent>,
+  pub has: HasOps,
+  pub has_below: HasOps,
+}
+
 /// Recipe duration. Either fixed seconds or a list of `(seconds,
 /// condition)` cases evaluated against an aspect pool, with a fallback at
 /// the tail.
@@ -377,9 +432,24 @@ pub struct RecipeDef {
   /// recipes the slots describe inputs the magnetic ticker pulls from
   /// the player's inventory at completion time.
   pub slots: Vec<Entity>,
-  /// What the recipe consumes on completion. See [`Reagent`] —
-  /// strings `"root"` / `"hex"` and 1-indexed slot integers in JSON.
-  pub reagents: Vec<Reagent>,
+  /// What the recipe consumes on completion. See [`Reagents`] —
+  /// `slots` consumes by role / 1-indexed slot positions; `has`
+  /// consumes from the actor's / root's soul-stack matches resolved
+  /// at proposal time.
+  pub reagents: Reagents,
+  /// Predicates over the actor's / root's soul-stack, UP direction
+  /// (equipment / things on top of the soul). Each list entry must
+  /// match a distinct card in the relevant owner's soul top stack;
+  /// lists are positional, duplicates mean "I need N of these."
+  /// Predicates aren't consumed; for consumption, repeat the entry
+  /// in `reagents.has`.
+  pub has: HasOps,
+  /// Predicates over the actor's / root's soul-stack, DOWN direction
+  /// (action stack / debuffs / things hanging below the soul). Same
+  /// shape and semantics as [`Self::has`] but resolved against the
+  /// down branch of the soul. Consumption mirrors via
+  /// `reagents.has_below`.
+  pub has_below: HasOps,
   /// Cards produced when the recipe's action completes normally —
   /// the inner queued for a magnetic outer, the standard end-of-action
   /// fire for everything else. JSON key: `output_success`.
@@ -563,10 +633,86 @@ pub fn match_stack_recipe(
   direction: StackDirection,
 ) -> Result<u16, String> {
   Ok(
-    match_stack_recipe_detail(hex_def, root_def, slot_defs, direction)?
+    match_stack_recipe_detail(hex_def, root_def, slot_defs, direction, None)?
       .map(|m| m.recipe_index)
       .unwrap_or(0),
   )
+}
+
+/// Candidate card definitions for has-predicate feasibility checks.
+/// Four pools — one per `(role, direction)` combination — because
+/// root and actor may have different owners (e.g. a combat recipe
+/// where root is the target and actor is the attacker, each walking
+/// a different soul stack). For OnCreate / self-rooted recipes where
+/// root == actor, the same defs feed both `*_root` and `*_actor`
+/// pools — that's expected and cheap.
+///
+/// Pools should contain the cards stacked on each owner's soul card
+/// in the named direction (UP = equipment / above, DOWN = action
+/// stack / below). Pass empty pools to mean "no equipment in this
+/// slot" — a recipe with `has.actor: [["axe"]]` will then be
+/// rejected as infeasible.
+#[derive(Debug, Default)]
+pub struct HasCandidates<'a> {
+  pub root_above: Vec<&'a CardDefinition>,
+  pub actor_above: Vec<&'a CardDefinition>,
+  pub root_below: Vec<&'a CardDefinition>,
+  pub actor_below: Vec<&'a CardDefinition>,
+}
+
+/// True iff every has-entry on the recipe has at least one
+/// non-zero-specificity candidate in the relevant pool. Mirrors the
+/// server-side `recipe_eval::has_predicates_feasible` so wasm-side
+/// callers (ActionManager) can pre-filter recipes whose `has`
+/// predicates can't possibly satisfy against the local soul stacks
+/// — avoids queuing actions that would be rejected by
+/// `propose_action`'s `resolve_has` round-trip.
+///
+/// Doesn't account for "two entries fighting for one card" — e.g.,
+/// `has.actor = [axe, axe]` against `[axe]` passes this check (both
+/// entries score on the one axe) but `resolve_has`'s greedy assign
+/// would fail. Those cases still fail at proposal time; this filter
+/// just catches the no-candidate-at-all case.
+pub fn has_predicates_feasible(
+  recipe: &RecipeDef,
+  candidates: &HasCandidates,
+) -> bool {
+  role_all_entries_feasible(
+    recipe.has.root.iter().chain(recipe.reagents.has.root.iter()),
+    &candidates.root_above,
+  ) && role_all_entries_feasible(
+    recipe.has.actor.iter().chain(recipe.reagents.has.actor.iter()),
+    &candidates.actor_above,
+  ) && role_all_entries_feasible(
+    recipe
+      .has_below
+      .root
+      .iter()
+      .chain(recipe.reagents.has_below.root.iter()),
+    &candidates.root_below,
+  ) && role_all_entries_feasible(
+    recipe
+      .has_below
+      .actor
+      .iter()
+      .chain(recipe.reagents.has_below.actor.iter()),
+    &candidates.actor_below,
+  )
+}
+
+fn role_all_entries_feasible<'a, I>(entries: I, pool: &[&CardDefinition]) -> bool
+where
+  I: IntoIterator<Item = &'a Entity>,
+{
+  for entry in entries {
+    let any_match = pool
+      .iter()
+      .any(|d| entity_specificity(entry, d) > 0);
+    if !any_match {
+      return false;
+    }
+  }
+  true
 }
 
 /// Same eligibility / ranking as [`match_stack_recipe`], but also
@@ -574,11 +720,21 @@ pub fn match_stack_recipe(
 /// whether the matched recipe carries `root` / `hex` constraints. See
 /// [`StackMatch`] for the field semantics. Returns `Ok(None)` when no
 /// recipe matched.
+///
+/// `has_candidates` is the optional has-predicate filter. When
+/// `Some`, recipes whose `has` / `reagents.has` / `has_below` /
+/// `reagents.has_below` predicates can't find any matching card in
+/// the relevant pool are skipped before scoring. Pass `None` (or all
+/// pools empty if `Some`) for the historical no-filter behavior —
+/// the server's submit_action matcher uses `None` since
+/// `propose_action::resolve_has` handles the satisfiability check
+/// at apply time.
 pub fn match_stack_recipe_detail(
   hex_def: u16,
   root_def: u16,
   slot_defs: &[u16],
   direction: StackDirection,
+  has_candidates: Option<&HasCandidates>,
 ) -> Result<Option<StackMatch>, String> {
   let candidates = recipes_of_type(RecipeType::Stack(direction))?;
 
@@ -621,6 +777,19 @@ pub fn match_stack_recipe_detail(
         s
       }
     };
+
+    // Has-predicate gate: when the caller supplied candidate pools
+    // (i.e. they want client-side `has` filtering), skip recipes
+    // whose has-predicates can't possibly satisfy. Without this the
+    // wasm matcher would queue actions that `propose_action` would
+    // reject on `resolve_has`, producing UI churn. The server's
+    // submit_action matcher passes `None` here since it relies on
+    // `resolve_has` at apply time instead.
+    if let Some(hc) = has_candidates {
+      if !has_predicates_feasible(recipe, hc) {
+        continue 'recipes;
+      }
+    }
 
     // Actor slot window: when `recipe.root` is set, the root tier is
     // consumed at chain[0], so the actor (slots[0]) can start no
@@ -1202,14 +1371,21 @@ fn parse_recipe(
     Vec::new()
   };
 
-  let reagents = if let Some(arr) = recipe_value.get("reagents").and_then(Value::as_array) {
-    arr
-      .iter()
-      .map(|v| parse_reagent(v, filename, &id))
-      .collect::<Result<Vec<_>, _>>()?
-  } else {
-    Vec::new()
-  };
+  // Reagents accept two shapes:
+  //   - Flat: `"reagents": ["hex", "root", 1, 2]` (legacy, equivalent
+  //     to `{ "slots": [...] }`).
+  //   - Structured: `"reagents": { "slots": [...], "has": {...} }`.
+  // Anything else (e.g., a bare object missing both keys, or a
+  // non-array under `slots`) is rejected with a specific error.
+  let reagents = parse_reagents(recipe_value.get("reagents"), type_ids, filename, &id)?;
+  let has = parse_has_ops(recipe_value.get("has"), type_ids, filename, &id, "has")?;
+  let has_below = parse_has_ops(
+    recipe_value.get("has_below"),
+    type_ids,
+    filename,
+    &id,
+    "has_below",
+  )?;
 
   // `products` was renamed to `output_success`; fail loud on the
   // legacy key so stale JSON doesn't silently drop its outputs.
@@ -1287,6 +1463,8 @@ fn parse_recipe(
     hex,
     slots,
     reagents,
+    has,
+    has_below,
     output_success,
     output_failure,
     duration,
@@ -1579,6 +1757,158 @@ fn parse_reagent(value: &Value, filename: &str, recipe_id: &str) -> Result<Reage
     "{}: recipe {:?} reagent {:?} not a string or non-negative integer",
     filename, recipe_id, value
   ))
+}
+
+/// Parse the `"reagents"` field on a recipe value. Two accepted
+/// shapes:
+///
+/// - **Flat** (legacy): `"reagents": ["hex", "root", 1, 2]` →
+///   `Reagents { slots: parsed, has: empty, has_below: empty }`.
+/// - **Structured**: `"reagents": { "slots": [...], "has": {...}, "has_below": {...} }` —
+///   any of the three sub-keys may be omitted (defaulting to empty).
+///
+/// `Reagents::default()` (all empty) is returned when the field is
+/// absent.
+fn parse_reagents(
+  value: Option<&Value>,
+  type_ids: &BTreeMap<String, u8>,
+  filename: &str,
+  recipe_id: &str,
+) -> Result<Reagents, String> {
+  let Some(value) = value else {
+    return Ok(Reagents::default());
+  };
+
+  // Flat-array form: parse straight into `slots`.
+  if let Some(arr) = value.as_array() {
+    let slots = arr
+      .iter()
+      .map(|v| parse_reagent(v, filename, recipe_id))
+      .collect::<Result<Vec<_>, _>>()?;
+    return Ok(Reagents {
+      slots,
+      has: HasOps::default(),
+      has_below: HasOps::default(),
+    });
+  }
+
+  // Structured form: object with optional `slots` / `has` / `has_below` keys.
+  let obj = value.as_object().ok_or_else(|| {
+    format!(
+      "{}: recipe {:?} reagents must be an array (flat form) or object \
+       (structured form with \"slots\" / \"has\" / \"has_below\" keys); got {:?}",
+      filename, recipe_id, value
+    )
+  })?;
+  // Reject unknown sub-keys so a typo doesn't silently drop reagents.
+  for k in obj.keys() {
+    if k != "slots" && k != "has" && k != "has_below" {
+      return Err(format!(
+        "{}: recipe {:?} reagents object has unknown sub-key {:?} \
+         (expected \"slots\", \"has\", or \"has_below\")",
+        filename, recipe_id, k
+      ));
+    }
+  }
+  let slots = if let Some(slots_value) = obj.get("slots") {
+    let arr = slots_value.as_array().ok_or_else(|| {
+      format!(
+        "{}: recipe {:?} reagents.slots must be an array",
+        filename, recipe_id
+      )
+    })?;
+    arr
+      .iter()
+      .map(|v| parse_reagent(v, filename, recipe_id))
+      .collect::<Result<Vec<_>, _>>()?
+  } else {
+    Vec::new()
+  };
+  let has = parse_has_ops(obj.get("has"), type_ids, filename, recipe_id, "reagents.has")?;
+  let has_below = parse_has_ops(
+    obj.get("has_below"),
+    type_ids,
+    filename,
+    recipe_id,
+    "reagents.has_below",
+  )?;
+  Ok(Reagents {
+    slots,
+    has,
+    has_below,
+  })
+}
+
+/// Parse a `has`-style sub-object: optional `"root"` / `"actor"` lists
+/// of entities. Used both for the top-level `"has"` field and for the
+/// `"has"` sub-key under `"reagents"`. `path_label` distinguishes the
+/// two in error messages.
+///
+/// Hex-owner has-checks (`hex_has`) are intentionally rejected with a
+/// pointer to the future-zones-todo — when the hex is a synthetic
+/// zone tile, there's no soul card to walk, and the "stack on
+/// hex.owner's soul" reading isn't really what hex semantics describe.
+fn parse_has_ops(
+  value: Option<&Value>,
+  type_ids: &BTreeMap<String, u8>,
+  filename: &str,
+  recipe_id: &str,
+  path_label: &str,
+) -> Result<HasOps, String> {
+  let Some(value) = value else {
+    return Ok(HasOps::default());
+  };
+  let obj = value.as_object().ok_or_else(|| {
+    format!(
+      "{}: recipe {:?} {} must be an object with \"root\" / \"actor\" lists",
+      filename, recipe_id, path_label
+    )
+  })?;
+  let mut ops = HasOps::default();
+  for (k, v) in obj {
+    match k.as_str() {
+      "root" | "actor" => {
+        let arr = v.as_array().ok_or_else(|| {
+          format!(
+            "{}: recipe {:?} {}.{} must be an array of entities",
+            filename, recipe_id, path_label, k
+          )
+        })?;
+        let entries = arr
+          .iter()
+          .enumerate()
+          .map(|(i, entity_value)| {
+            parse_entity(
+              entity_value,
+              type_ids,
+              filename,
+              recipe_id,
+              &format!("{}.{}[{}]", path_label, k, i),
+            )
+          })
+          .collect::<Result<Vec<_>, _>>()?;
+        if k == "root" {
+          ops.root = entries;
+        } else {
+          ops.actor = entries;
+        }
+      }
+      "hex" => {
+        return Err(format!(
+          "{}: recipe {:?} {}.hex not supported — hex-owner has-checks \
+           are a future feature pending zone-owner semantics",
+          filename, recipe_id, path_label
+        ));
+      }
+      other => {
+        return Err(format!(
+          "{}: recipe {:?} {} unknown sub-key {:?} (expected \"root\" or \"actor\")",
+          filename, recipe_id, path_label, other
+        ));
+      }
+    }
+  }
+  Ok(ops)
 }
 
 fn parse_entity(

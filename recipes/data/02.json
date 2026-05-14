@@ -8,6 +8,9 @@
         "slots": [
             ["corpus"]
         ],
+        "has": {
+          "actor": [["axe"]]
+        },
         "reagents": ["hex", 1],
         "output_success": { "inventory": { "actor": ["corpus-", "log"] } },
         "duration": 10,
@@ -19,7 +22,7 @@
         "slots": [
             ["corpus"]
         ],
-        "reagents": ["hex", 1],
+        "reagents": { "slots": ["hex", 1] },
         "output_success": { "inventory": { "actor": ["corpus-", "stone"] } },
         "duration": 10,
         "style": 2

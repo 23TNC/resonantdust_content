@@ -299,7 +299,13 @@ pub struct CardDefinition {
   /// against `traits.json` via `trait_id`. Empty for cards that don't
   /// declare any traits yet (the JSON requires the field to be present
   /// as an object, but `{}` is valid).
-  pub traits: Vec<(TraitId, i32)>,
+  /// `(trait_id, value)` pairs parsed from the card's JSON `"traits"`
+  /// block. Values are `f32` because some traits (notably the tile
+  /// `cost` trait used by movement pathfinding) are naturally
+  /// fractional — `forest_2`'s `1.2` cost wouldn't survive an `i32`
+  /// round-trip. JSON integers parse to whole-number floats (`1` →
+  /// `1.0`) without loss.
+  pub traits: Vec<(TraitId, f32)>,
   /// Bit-mask of flags applied to every card spawned with this
   /// definition. Currently always 0 — per-definition flag presets are
   /// not declared in card JSON. Kept on the struct because
@@ -308,6 +314,20 @@ pub struct CardDefinition {
   /// initialisation here when a definition needs to spawn cards with
   /// non-zero flags again.
   pub flags: u32,
+}
+
+impl CardDefinition {
+  /// Look up a trait's value on this definition by `trait_id`.
+  /// Returns `None` if the card doesn't carry that trait — callers
+  /// supply a per-trait default. Used by `movement::tile_cost` to
+  /// read the `cost` trait off a tile def, where "no trait" means
+  /// "default cost." */
+  pub fn trait_value(&self, trait_id: TraitId) -> Option<f32> {
+    self
+      .traits
+      .iter()
+      .find_map(|(id, v)| (*id == trait_id).then_some(*v))
+  }
 }
 
 const CARD_TYPES_JSON: &str = include_str!("../cards/types.json");
@@ -658,7 +678,7 @@ fn parse_card(
     .and_then(Value::as_object)
     .ok_or_else(|| format!("{}: card {}: missing or non-object 'traits'", filename, key))?;
 
-  let mut traits: Vec<(TraitId, i32)> = Vec::with_capacity(traits_obj.len());
+  let mut traits: Vec<(TraitId, f32)> = Vec::with_capacity(traits_obj.len());
   let mut seen_trait_ids: BTreeSet<TraitId> = BTreeSet::new();
   for (trait_name, trait_val) in traits_obj.iter() {
     let id = trait_id(trait_name)?.ok_or_else(|| {
@@ -673,12 +693,16 @@ fn parse_card(
         filename, key, trait_name
       ));
     }
-    let trait_value = trait_val.as_i64().ok_or_else(|| {
+    // `as_f64()` accepts both JSON integers and floats — a trait value
+    // of `1` parses to `1.0` losslessly, while `1.2` (the `forest_2`
+    // tile cost) survives intact. Rejecting non-numeric values keeps
+    // the error message specific.
+    let trait_value = trait_val.as_f64().ok_or_else(|| {
       format!(
-        "{}: card {}: trait {:?} value not an integer",
+        "{}: card {}: trait {:?} value not a number",
         filename, key, trait_name
       )
-    })? as i32;
+    })? as f32;
     traits.push((id, trait_value));
   }
 

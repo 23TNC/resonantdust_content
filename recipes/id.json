@@ -26,9 +26,8 @@
       "tripple_corpus": 1,
       "dread_remover": 2,
       "corpus_up": 3,
-      "woodcutting": 4,
-      "cut_tree": 5,
-      "break_rock": 6
+      "cut_tree": 4,
+      "break_rock": 5
     }
   }
 }

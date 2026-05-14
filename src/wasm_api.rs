@@ -16,11 +16,14 @@ use crate::definition_core::{
   decode_definition as core_decode_definition,
   find_packed_by_key as core_find_packed_by_key,
   is_hex_type as core_is_hex_type,
+  CardDefinition,
 };
-use crate::flags_core::card_flag_bit as core_card_flag_bit;
+use crate::flags_core::{
+  card_flag_bit as core_card_flag_bit, card_flag_field as core_card_flag_field,
+};
 use crate::recipe_core::{
   match_stack_recipe_detail as core_match_stack_recipe_detail,
-  StackDirection,
+  HasCandidates, StackDirection,
 };
 
 /// Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
@@ -62,6 +65,22 @@ pub fn card_flag_bit(name: &str) -> Result<Option<u8>, JsValue> {
   core_card_flag_bit(name).map_err(|e| JsValue::from_str(&e))
 }
 
+/// Read the value of a multi-bit card-flag field (e.g.
+/// `"progress_style"`, `"position_hold_count"`) out of a `flags`
+/// u32. Returns `undefined` if no field with that name is declared in
+/// `cards/flags.json`; returns the extracted unsigned value
+/// otherwise. Throws on registry-build failure.
+///
+/// Equivalent to `(flags >> field.shift) & field.mask`. JS-side
+/// callers checking "is the count > 0?" use `value > 0`; callers
+/// reading specific enum-style values (`progress_style == 1`)
+/// compare directly.
+#[wasm_bindgen(js_name = cardFlagFieldValue)]
+pub fn card_flag_field_value(flags: u32, name: &str) -> Result<Option<u32>, JsValue> {
+  let field = core_card_flag_field(name).map_err(|e| JsValue::from_str(&e))?;
+  Ok(field.map(|f| (flags & f.mask()) >> f.shift as u32))
+}
+
 /// Find the best-matching `Stack(direction)` recipe for a chain.
 /// `hex_def` is the packed definition of the hex card the chain root is
 /// attached to (`0` if not stacked on hex). `root_def` is the loose
@@ -69,19 +88,35 @@ pub fn card_flag_bit(name: &str) -> Result<Option<u8>, JsValue> {
 /// cards stacked above (`direction = 0` / "up") or below
 /// (`direction = 1` / "down") the root, in chain order.
 ///
+/// `root_above` / `actor_above` / `root_below` / `actor_below` are the
+/// packed definitions of cards stacked on each role's soul card in
+/// each direction (UP = equipment / above the soul, DOWN = action
+/// stack / below the soul). They feed the `has` / `reagents.has` /
+/// `has_below` / `reagents.has_below` feasibility filter: recipes
+/// whose has-predicates can't find any matching card in the
+/// corresponding pool are skipped before scoring. Pass empty arrays
+/// to mean "no equipment / nothing on the soul stack" — recipes
+/// that declare has-predicates will then be filtered out, which is
+/// the correct behaviour for an unattached player.
+///
+/// Unknown packed defs in any pool array are silently skipped (treat
+/// the registry as authoritative — a wire-side glitch shouldn't
+/// crash matching).
+///
 /// Returns a `StackMatch` object on success (with `recipeIndex`,
 /// `slotStart`, `slotCount`, `hasRoot`, `hasHex`) or `null` if no
 /// recipe matched. Throws on registry-build failure or invalid
-/// direction. The `slotStart` / `slotCount` fields tell the caller
-/// which slice of the chain (`chain = [root] ++ slot_defs`) fills the
-/// recipe's slot list — needed to assemble the `propose_action`
-/// reducer call correctly.
+/// direction.
 #[wasm_bindgen(js_name = matchStackRecipe)]
 pub fn match_stack_recipe(
   hex_def: u16,
   root_def: u16,
   slot_defs: Vec<u16>,
   direction: u8,
+  root_above: Vec<u16>,
+  actor_above: Vec<u16>,
+  root_below: Vec<u16>,
+  actor_below: Vec<u16>,
 ) -> Result<JsValue, JsValue> {
   let dir = match direction {
     0 => StackDirection::Up,
@@ -93,11 +128,44 @@ pub fn match_stack_recipe(
       )));
     }
   };
-  let opt = core_match_stack_recipe_detail(hex_def, root_def, &slot_defs, dir)
-    .map_err(|e| JsValue::from_str(&e))?;
+  let root_above_defs = decode_def_pool(&root_above)?;
+  let actor_above_defs = decode_def_pool(&actor_above)?;
+  let root_below_defs = decode_def_pool(&root_below)?;
+  let actor_below_defs = decode_def_pool(&actor_below)?;
+  let has_candidates = HasCandidates {
+    root_above: root_above_defs,
+    actor_above: actor_above_defs,
+    root_below: root_below_defs,
+    actor_below: actor_below_defs,
+  };
+  let opt = core_match_stack_recipe_detail(
+    hex_def,
+    root_def,
+    &slot_defs,
+    dir,
+    Some(&has_candidates),
+  )
+  .map_err(|e| JsValue::from_str(&e))?;
   match opt {
     Some(m) => serde_wasm_bindgen::to_value(&m)
       .map_err(|e| JsValue::from_str(&e.to_string())),
     None => Ok(JsValue::NULL),
   }
+}
+
+/// Decode a packed-def array into `&CardDefinition` refs, dropping
+/// any entries that don't resolve. Used by `match_stack_recipe` to
+/// build the four has-candidate pools — unknown packed values are
+/// treated as "card not in catalog" rather than fatal, so a stale
+/// client def won't crash matching while a registry rebuild is
+/// pending.
+fn decode_def_pool(packed: &[u16]) -> Result<Vec<&'static CardDefinition>, JsValue> {
+  let mut out = Vec::with_capacity(packed.len());
+  for &p in packed {
+    match core_decode_definition(p).map_err(|e| JsValue::from_str(&e))? {
+      Some(def) => out.push(def),
+      None => continue,
+    }
+  }
+  Ok(out)
 }

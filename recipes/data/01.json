@@ -33,22 +33,6 @@
         "output_success": { "inventory": { "root": ["corpus-"] } },
         "duration": 10,
         "style": 2
-      },
-      {
-        "id": "woodcutting",
-        "slots": [
-            [["labor", 1], [], ["wood", 1]],
-            ["corpus"]
-        ],
-        "reagents": [1],
-        "output_success": {
-          "inventory": {
-            "root": ["corpus-"],
-            "actor": [["log", [4, 1], "vigor"]]
-          }
-        },
-        "duration": 30,
-        "style": 1
       }
     ],
     "down": [

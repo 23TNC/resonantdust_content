@@ -7,13 +7,13 @@
         "name": "Plains",
         "style": ["#799E50", "#0b1426", "#0b1426"],
         "aspects": {},
-        "traits": {}
+        "traits": {"cost": 10}
       },
       "forest_2": {
         "name": "Forest",
         "style": ["#395C39", "#7fb377", "#0b1426"],
         "aspects": {},
-        "traits": {}
+        "traits": {"cost": 12}
       }
     }
   }

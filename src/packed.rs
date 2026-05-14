@@ -76,20 +76,15 @@ impl StackedState {
 
 // ---- valid_at ----------------------------------------------------------
 
-pub fn pack_valid_at(card_id: u32, time_secs: u32) -> u64 {
-    ((card_id as u64) << 32) | (time_secs as u64)
+// PK layout: `(time_ms_u48 << 16) | sequence_u16`. See the
+// server-side packed.rs for the full rationale.
+
+pub fn pack_valid_at(time_ms: u64, sequence: u16) -> u64 {
+    (time_ms << 16) | (sequence as u64)
 }
 
-pub fn unpack_valid_at(v: u64) -> (u32, u32) {
-    ((v >> 32) as u32, v as u32)
-}
-
-pub fn valid_at_card_id(v: u64) -> u32 {
-    (v >> 32) as u32
-}
-
-pub fn valid_at_time(v: u64) -> u32 {
-    v as u32
+pub fn valid_at_time(v: u64) -> u64 {
+    v >> 16
 }
 
 // ---- macro_zone --------------------------------------------------------
@@ -285,10 +280,9 @@ mod tests {
 
     #[test]
     fn valid_at_roundtrip() {
-        let v = pack_valid_at(0xDEAD_BEEF, 0x1234_5678);
-        assert_eq!(unpack_valid_at(v), (0xDEAD_BEEF, 0x1234_5678));
-        assert_eq!(valid_at_card_id(v), 0xDEAD_BEEF);
-        assert_eq!(valid_at_time(v), 0x1234_5678);
+        let v = pack_valid_at(0x0000_DEAD_BEEF_1234, 0x5678);
+        assert_eq!(valid_at_time(v), 0x0000_DEAD_BEEF_1234);
+        assert_eq!(v & 0xFFFF, 0x5678);
     }
 
     #[test]

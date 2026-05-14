@@ -11,6 +11,20 @@
 export function cardFlagBit(name: string): number | undefined;
 
 /**
+ * Read the value of a multi-bit card-flag field (e.g.
+ * `"progress_style"`, `"position_hold_count"`) out of a `flags`
+ * u32. Returns `undefined` if no field with that name is declared in
+ * `cards/flags.json`; returns the extracted unsigned value
+ * otherwise. Throws on registry-build failure.
+ *
+ * Equivalent to `(flags >> field.shift) & field.mask`. JS-side
+ * callers checking "is the count > 0?" use `value > 0`; callers
+ * reading specific enum-style values (`progress_style == 1`)
+ * compare directly.
+ */
+export function cardFlagFieldValue(flags: number, name: string): number | undefined;
+
+/**
  * Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
  * into a `CardDefinition`-shaped JS object. Returns `null` if no card
  * matches the packed value. Throws a string error if the card registry
@@ -39,25 +53,38 @@ export function isHexType(type_id: number): boolean;
  * cards stacked above (`direction = 0` / "up") or below
  * (`direction = 1` / "down") the root, in chain order.
  *
+ * `root_above` / `actor_above` / `root_below` / `actor_below` are the
+ * packed definitions of cards stacked on each role's soul card in
+ * each direction (UP = equipment / above the soul, DOWN = action
+ * stack / below the soul). They feed the `has` / `reagents.has` /
+ * `has_below` / `reagents.has_below` feasibility filter: recipes
+ * whose has-predicates can't find any matching card in the
+ * corresponding pool are skipped before scoring. Pass empty arrays
+ * to mean "no equipment / nothing on the soul stack" — recipes
+ * that declare has-predicates will then be filtered out, which is
+ * the correct behaviour for an unattached player.
+ *
+ * Unknown packed defs in any pool array are silently skipped (treat
+ * the registry as authoritative — a wire-side glitch shouldn't
+ * crash matching).
+ *
  * Returns a `StackMatch` object on success (with `recipeIndex`,
  * `slotStart`, `slotCount`, `hasRoot`, `hasHex`) or `null` if no
  * recipe matched. Throws on registry-build failure or invalid
- * direction. The `slotStart` / `slotCount` fields tell the caller
- * which slice of the chain (`chain = [root] ++ slot_defs`) fills the
- * recipe's slot list — needed to assemble the `propose_action`
- * reducer call correctly.
+ * direction.
  */
-export function matchStackRecipe(hex_def: number, root_def: number, slot_defs: Uint16Array, direction: number): any;
+export function matchStackRecipe(hex_def: number, root_def: number, slot_defs: Uint16Array, direction: number, root_above: Uint16Array, actor_above: Uint16Array, root_below: Uint16Array, actor_below: Uint16Array): any;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly cardFlagBit: (a: number, b: number) => [number, number, number];
+    readonly cardFlagFieldValue: (a: number, b: number, c: number) => [number, number, number];
     readonly decodeDefinition: (a: number) => [number, number, number];
     readonly findPackedByKey: (a: number, b: number) => [number, number, number];
     readonly isHexType: (a: number) => [number, number, number];
-    readonly matchStackRecipe: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly matchStackRecipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;

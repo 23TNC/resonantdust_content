@@ -20,6 +20,31 @@ export function cardFlagBit(name) {
 }
 
 /**
+ * Read the value of a multi-bit card-flag field (e.g.
+ * `"progress_style"`, `"position_hold_count"`) out of a `flags`
+ * u32. Returns `undefined` if no field with that name is declared in
+ * `cards/flags.json`; returns the extracted unsigned value
+ * otherwise. Throws on registry-build failure.
+ *
+ * Equivalent to `(flags >> field.shift) & field.mask`. JS-side
+ * callers checking "is the count > 0?" use `value > 0`; callers
+ * reading specific enum-style values (`progress_style == 1`)
+ * compare directly.
+ * @param {number} flags
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function cardFlagFieldValue(flags, name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.cardFlagFieldValue(flags, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
+}
+
+/**
  * Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
  * into a `CardDefinition`-shaped JS object. Returns `null` if no card
  * matches the packed value. Throws a string error if the card registry
@@ -74,23 +99,47 @@ export function isHexType(type_id) {
  * cards stacked above (`direction = 0` / "up") or below
  * (`direction = 1` / "down") the root, in chain order.
  *
+ * `root_above` / `actor_above` / `root_below` / `actor_below` are the
+ * packed definitions of cards stacked on each role's soul card in
+ * each direction (UP = equipment / above the soul, DOWN = action
+ * stack / below the soul). They feed the `has` / `reagents.has` /
+ * `has_below` / `reagents.has_below` feasibility filter: recipes
+ * whose has-predicates can't find any matching card in the
+ * corresponding pool are skipped before scoring. Pass empty arrays
+ * to mean "no equipment / nothing on the soul stack" — recipes
+ * that declare has-predicates will then be filtered out, which is
+ * the correct behaviour for an unattached player.
+ *
+ * Unknown packed defs in any pool array are silently skipped (treat
+ * the registry as authoritative — a wire-side glitch shouldn't
+ * crash matching).
+ *
  * Returns a `StackMatch` object on success (with `recipeIndex`,
  * `slotStart`, `slotCount`, `hasRoot`, `hasHex`) or `null` if no
  * recipe matched. Throws on registry-build failure or invalid
- * direction. The `slotStart` / `slotCount` fields tell the caller
- * which slice of the chain (`chain = [root] ++ slot_defs`) fills the
- * recipe's slot list — needed to assemble the `propose_action`
- * reducer call correctly.
+ * direction.
  * @param {number} hex_def
  * @param {number} root_def
  * @param {Uint16Array} slot_defs
  * @param {number} direction
+ * @param {Uint16Array} root_above
+ * @param {Uint16Array} actor_above
+ * @param {Uint16Array} root_below
+ * @param {Uint16Array} actor_below
  * @returns {any}
  */
-export function matchStackRecipe(hex_def, root_def, slot_defs, direction) {
+export function matchStackRecipe(hex_def, root_def, slot_defs, direction, root_above, actor_above, root_below, actor_below) {
     const ptr0 = passArray16ToWasm0(slot_defs, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.matchStackRecipe(hex_def, root_def, ptr0, len0, direction);
+    const ptr1 = passArray16ToWasm0(root_above, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray16ToWasm0(actor_above, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray16ToWasm0(root_below, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray16ToWasm0(actor_below, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.matchStackRecipe(hex_def, root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
