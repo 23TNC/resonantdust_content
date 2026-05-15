@@ -71,6 +71,8 @@ pub struct Aspect {
   pub name: String,
   /// Human-readable description from the JSON.
   pub description: String,
+  /// Unicode icon representing this aspect, e.g. `"⚔"`.
+  pub icon: String,
   /// Group the aspect was declared under, e.g. `"resources"`.
   pub group: String,
 }
@@ -142,11 +144,30 @@ fn build_aspects() -> Result<AspectRegistry, String> {
       let id = next_id as AspectId;
       next_id += 1;
 
-      let description = desc_value
-        .as_str()
+      let entry_obj = desc_value.as_object().ok_or_else(|| {
+        format!(
+          "aspects.json: aspect {}/{} not an object (expected {{\"icon\": ..., \"description\": ...}})",
+          group_name, aspect_name
+        )
+      })?;
+
+      let description = entry_obj
+        .get("description")
+        .and_then(Value::as_str)
         .ok_or_else(|| {
           format!(
-            "aspects.json: aspect {}/{} description not a string",
+            "aspects.json: aspect {}/{} missing or non-string 'description'",
+            group_name, aspect_name
+          )
+        })?
+        .to_string();
+
+      let icon = entry_obj
+        .get("icon")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+          format!(
+            "aspects.json: aspect {}/{} missing or non-string 'icon'",
             group_name, aspect_name
           )
         })?
@@ -156,6 +177,7 @@ fn build_aspects() -> Result<AspectRegistry, String> {
         id,
         name: aspect_name.clone(),
         description,
+        icon,
         group: group_name.clone(),
       });
       id_by_name.insert(aspect_name.clone(), id);
@@ -282,11 +304,13 @@ pub struct CardDefinition {
   pub card_type: u8,
   pub card_category: u8,
   pub definition_id: u8,
-  /// Programmatic key from the JSON, e.g. `"attack"`. Stable when the
-  /// display `name` is renamed.
+  /// Programmatic key from the JSON, e.g. `"axe"`. Stable identifier
+  /// used as the path-form last segment (`requisite/default/axe`) and
+  /// as the lookup key in `content/locales/cards/<lang>.json` for
+  /// display label / description resolution. Display labels are NOT
+  /// stored on the definition — clients resolve them via the locales
+  /// registry; the bare key is the dev-side fallback.
   pub key: String,
-  /// Display name, e.g. `"Attack"`.
-  pub name: String,
   /// Three CSS hex color codes for rendering. Validated as `#RRGGBB` at
   /// registry build time.
   pub style: [String; 3],
@@ -350,6 +374,11 @@ struct CardRegistry {
   /// `type_id` → shape (`"rect"` or `"hex"`) from `cards/types.json`.
   /// Drives [`is_hex_type`]; missing types default to `"rect"`.
   type_shapes: BTreeMap<u8, String>,
+  /// Reverse of `type_ids`: `type_id` → name. Used to construct locale
+  /// paths like `"requisite.default.axe"` from a packed definition.
+  type_names: BTreeMap<u8, String>,
+  /// Reverse of `category_ids`: `category_id` → name.
+  category_names: BTreeMap<u8, String>,
 }
 
 static CARDS: OnceLock<Result<CardRegistry, String>> = OnceLock::new();
@@ -394,6 +423,35 @@ pub fn card_type_ids() -> Result<&'static BTreeMap<String, u8>, String> {
   Ok(&cards_registry()?.type_ids)
 }
 
+/// All known `card_category` ids keyed by name. Recipe parsing resolves
+/// `{"category": "<name>"}` entity objects through this map. Triggers a
+/// build of the card registry on first access (same `Result` discipline
+/// as [`card_type_ids`]).
+pub fn card_category_ids() -> Result<&'static BTreeMap<String, u8>, String> {
+  Ok(&cards_registry()?.category_ids)
+}
+
+/// Build the dotted locale-lookup path for a packed definition, e.g.
+/// `"requisite.default.axe"`. Returns `Ok(None)` for unknown packed ids.
+/// The path format mirrors `locales/cards/<lang>.json`'s nesting and is
+/// consumed by `locales_core::label("cards", lang, path)`.
+pub fn card_locale_path(packed_def: u16) -> Result<Option<String>, String> {
+  let registry = cards_registry()?;
+  let Some(def) = registry.by_packed.get(&packed_def) else {
+    return Ok(None);
+  };
+  let type_name = registry
+    .type_names
+    .get(&def.card_type)
+    .map(String::as_str)
+    .unwrap_or("unknown");
+  let category_name = registry
+    .category_names
+    .get(&def.card_category)
+    .map(String::as_str)
+    .unwrap_or("unknown");
+  Ok(Some(format!("{}.{}.{}", type_name, category_name, def.key)))
+}
 
 /// Resolve a `"type/key"` or `"type/category/key"` string to the card's
 /// `packed_definition`. Two-segment paths default the category to
@@ -435,6 +493,10 @@ fn build_cards() -> Result<CardRegistry, String> {
   let type_ids = json_id_map(&types_root, "types")?;
   let category_ids = json_id_map(&types_root, "categories")?;
   let type_shapes = json_type_shapes(&types_root)?;
+  let type_names: BTreeMap<u8, String> =
+    type_ids.iter().map(|(k, &v)| (v, k.clone())).collect();
+  let category_names: BTreeMap<u8, String> =
+    category_ids.iter().map(|(k, &v)| (v, k.clone())).collect();
 
   // Load stable definition_id map — must exist (run gen-ids.py before building).
   // Format: { "<card_type>": { "<key>": <definition_id>, ... }, ... }
@@ -479,69 +541,63 @@ fn build_cards() -> Result<CardRegistry, String> {
   for (filename, content) in CARDS_FILES {
     let parsed: Value = serde_json::from_str(content)
       .map_err(|e| format!("{}: parse failed: {}", filename, e))?;
-    // Accept either an array of buckets or a single bare bucket object —
-    // both shapes are normalised to a slice so the loop body stays the
-    // same.
-    let owned_singleton;
-    let buckets: &[Value] = match &parsed {
-      Value::Array(v) => v.as_slice(),
-      Value::Object(_) => {
-        owned_singleton = [parsed.clone()];
-        &owned_singleton
-      }
-      _ => {
-        return Err(format!(
-          "{}: top-level must be a bucket object or an array of buckets",
-          filename
-        ));
-      }
-    };
+    // Nested shape:
+    //   {
+    //     "<card_type>": {
+    //       "<category>": {
+    //         "<key>": { "style": [...], "aspects"?: {...}, "traits"?: {...} }
+    //       }
+    //     }
+    //   }
+    //
+    // Multiple types per file → multiple top-level keys.
+    // `aspects` / `traits` are optional (default `{}`); `style` is
+    // required. Card paths matching `cards/types.json` decode to ids
+    // here; unknown types/categories are silently skipped so card
+    // data can outpace the registry without breaking the build (a
+    // typo just won't produce a decodable card).
+    let root = parsed.as_object().ok_or_else(|| {
+      format!("{}: top-level must be an object keyed by card_type", filename)
+    })?;
 
-    for bucket in buckets {
-      let type_name = bucket["card_type"]
-        .as_str()
-        .ok_or_else(|| format!("{}: bucket missing 'card_type'", filename))?;
-      let category_name = bucket["category"]
-        .as_str()
-        .ok_or_else(|| format!("{}: bucket missing 'category'", filename))?;
-
-      // Buckets whose type or category isn't in cards/types.json are silently
-      // skipped — this lets card data files outpace the registry without
-      // breaking the build, but means a typo'd bucket name simply won't
-      // produce decodable cards. Fix cards/types.json or the bucket name if
-      // a definition isn't decoding.
+    for (type_name, by_category) in root {
       let Some(&card_type) = type_ids.get(type_name) else { continue };
-      let Some(&card_category) = category_ids.get(category_name) else { continue };
-
-      let cards_obj = bucket["cards"].as_object().ok_or_else(|| {
-        format!(
-          "{}: bucket {}/{}: 'cards' not an object",
-          filename, type_name, category_name
-        )
+      let categories = by_category.as_object().ok_or_else(|| {
+        format!("{}: type {:?}: value not an object", filename, type_name)
       })?;
 
-      for (key, value) in cards_obj.iter() {
-        let definition_id = definition_ids
-          .get(type_name)
-          .and_then(|m| m.get(category_name))
-          .and_then(|m| m.get(key.as_str()))
-          .copied()
-          .ok_or_else(|| {
-            format!(
-              "{}: card {:?} ({:?}/{:?}) not found in cards/id.json — run gen-ids.py",
-              filename, key, type_name, category_name
-            )
-          })?;
-        let definition = parse_card(filename, value, card_type, card_category, definition_id, key)?;
-        let packed = pack_definition(card_type, card_category, definition_id);
-        by_packed.insert(packed, definition);
-        by_path.insert((card_type, card_category, key.clone()), packed);
-        by_key.insert(key.clone(), packed);
+      for (category_name, by_key_val) in categories {
+        let Some(&card_category) = category_ids.get(category_name) else { continue };
+        let cards_obj = by_key_val.as_object().ok_or_else(|| {
+          format!(
+            "{}: {}/{}: category value not an object",
+            filename, type_name, category_name
+          )
+        })?;
+
+        for (key, value) in cards_obj.iter() {
+          let definition_id = definition_ids
+            .get(type_name)
+            .and_then(|m| m.get(category_name))
+            .and_then(|m| m.get(key.as_str()))
+            .copied()
+            .ok_or_else(|| {
+              format!(
+                "{}: card {:?} ({:?}/{:?}) not found in cards/id.json — run gen-ids.py",
+                filename, key, type_name, category_name
+              )
+            })?;
+          let definition = parse_card(filename, value, card_type, card_category, definition_id, key)?;
+          let packed = pack_definition(card_type, card_category, definition_id);
+          by_packed.insert(packed, definition);
+          by_path.insert((card_type, card_category, key.clone()), packed);
+          by_key.insert(key.clone(), packed);
+        }
       }
     }
   }
 
-  Ok(CardRegistry { by_packed, by_path, by_key, type_ids, category_ids, type_shapes })
+  Ok(CardRegistry { by_packed, by_path, by_key, type_ids, category_ids, type_shapes, type_names, category_names })
 }
 
 /// Build a `type_id → shape` map from `cards/types.json`'s `types`
@@ -622,12 +678,6 @@ fn parse_card(
     .as_object()
     .ok_or_else(|| format!("{}: card {}: spec not an object", filename, key))?;
 
-  let name = obj
-    .get("name")
-    .and_then(Value::as_str)
-    .ok_or_else(|| format!("{}: card {}: missing or non-string 'name'", filename, key))?
-    .to_string();
-
   let style_arr = obj
     .get("style")
     .and_then(Value::as_array)
@@ -644,13 +694,44 @@ fn parse_card(
     style_str(filename, key, style_arr, 2)?,
   ];
 
-  let aspects_obj = obj
-    .get("aspects")
-    .and_then(Value::as_object)
-    .ok_or_else(|| format!("{}: card {}: missing or non-object 'aspects'", filename, key))?;
+  // `aspects` and `traits` are optional. Empty / missing both mean
+  // "no aspects" / "no traits" — most cards declare neither and the
+  // tree-shaped data file lets them omit the empty objects entirely.
+  // When present, the value must be an object; non-object → parse error.
+  let aspects = match obj.get("aspects") {
+    None => Vec::new(),
+    Some(Value::Object(aspects_obj)) => parse_aspects(filename, key, aspects_obj)?,
+    Some(_) => {
+      return Err(format!("{}: card {}: 'aspects' not an object", filename, key));
+    }
+  };
+  let traits = match obj.get("traits") {
+    None => Vec::new(),
+    Some(Value::Object(traits_obj)) => parse_traits(filename, key, traits_obj)?,
+    Some(_) => {
+      return Err(format!("{}: card {}: 'traits' not an object", filename, key));
+    }
+  };
 
+  Ok(CardDefinition {
+    card_type,
+    card_category,
+    definition_id,
+    key: key.to_string(),
+    style,
+    aspects,
+    traits,
+    flags: 0,
+  })
+}
+
+fn parse_aspects(
+  filename: &str,
+  key: &str,
+  aspects_obj: &serde_json::Map<String, Value>,
+) -> Result<Vec<(AspectId, i32)>, String> {
   let mut aspects: Vec<(AspectId, i32)> = Vec::with_capacity(aspects_obj.len());
-  let mut seen_aspect_ids: BTreeSet<AspectId> = BTreeSet::new();
+  let mut seen: BTreeSet<AspectId> = BTreeSet::new();
   for (aspect_name, aspect_val) in aspects_obj.iter() {
     let id = aspect_id(aspect_name)?.ok_or_else(|| {
       format!(
@@ -658,7 +739,7 @@ fn parse_card(
         filename, key, aspect_name
       )
     })?;
-    if !seen_aspect_ids.insert(id) {
+    if !seen.insert(id) {
       return Err(format!(
         "{}: card {}: aspect {:?} listed more than once",
         filename, key, aspect_name
@@ -672,14 +753,16 @@ fn parse_card(
     })? as i32;
     aspects.push((id, aspect_value));
   }
+  Ok(aspects)
+}
 
-  let traits_obj = obj
-    .get("traits")
-    .and_then(Value::as_object)
-    .ok_or_else(|| format!("{}: card {}: missing or non-object 'traits'", filename, key))?;
-
+fn parse_traits(
+  filename: &str,
+  key: &str,
+  traits_obj: &serde_json::Map<String, Value>,
+) -> Result<Vec<(TraitId, f32)>, String> {
   let mut traits: Vec<(TraitId, f32)> = Vec::with_capacity(traits_obj.len());
-  let mut seen_trait_ids: BTreeSet<TraitId> = BTreeSet::new();
+  let mut seen: BTreeSet<TraitId> = BTreeSet::new();
   for (trait_name, trait_val) in traits_obj.iter() {
     let id = trait_id(trait_name)?.ok_or_else(|| {
       format!(
@@ -687,7 +770,7 @@ fn parse_card(
         filename, key, trait_name
       )
     })?;
-    if !seen_trait_ids.insert(id) {
+    if !seen.insert(id) {
       return Err(format!(
         "{}: card {}: trait {:?} listed more than once",
         filename, key, trait_name
@@ -705,18 +788,7 @@ fn parse_card(
     })? as f32;
     traits.push((id, trait_value));
   }
-
-  Ok(CardDefinition {
-    card_type,
-    card_category,
-    definition_id,
-    key: key.to_string(),
-    name,
-    style,
-    aspects,
-    traits,
-    flags: 0,
-  })
+  Ok(traits)
 }
 
 fn style_str(filename: &str, key: &str, arr: &[Value], idx: usize) -> Result<String, String> {

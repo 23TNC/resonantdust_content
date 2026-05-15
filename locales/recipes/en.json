@@ -1,0 +1,69 @@
+{
+  "stack": {
+    "up": {
+      "cut_tree": {
+        "label": "cut tree",
+        "success": {
+          "simple": "{actor} chopped down {root}."
+        }
+      },
+      "break_rock": {
+        "label": "break rock",
+        "success": {
+          "simple": "{actor} broke {root}."
+        }
+      },
+      "corpus_up": {
+        "label": "corpus_up"
+      },
+      "dread_remover": {
+        "label": "dread_remover"
+      },
+      "triple_corpus": {
+        "label": "triple_corpus"
+      }
+    },
+    "down": {
+      "corpus_down": {
+        "label": "corpus_down"
+      },
+      "corpus_down_aspect": {
+        "label": "corpus_down_aspect"
+      }
+    }
+  },
+  "magnetic": {
+    "up": {
+      "despair_failure": {
+        "label": "despair_failure"
+      },
+      "despair_success": {
+        "label": "despair_success"
+      },
+      "strike_failure": {
+        "label": "strike_failure"
+      },
+      "strike_success": {
+        "label": "strike_success"
+      }
+    }
+  },
+  "on_create": {
+    "magnetic": {
+      "despair": {
+        "label": "despair"
+      },
+      "strike": {
+        "label": "strike"
+      }
+    },
+    "self": {
+      "corpus-": {
+        "label": "corpus-"
+      },
+      "fleeting": {
+        "label": "fleeting"
+      }
+    }
+  }
+}

@@ -13,6 +13,8 @@
 use wasm_bindgen::prelude::*;
 
 use crate::definition_core::{
+  aspect as core_aspect,
+  card_locale_path as core_card_locale_path,
   decode_definition as core_decode_definition,
   find_packed_by_key as core_find_packed_by_key,
   is_hex_type as core_is_hex_type,
@@ -25,6 +27,23 @@ use crate::recipe_core::{
   match_stack_recipe_detail as core_match_stack_recipe_detail,
   HasCandidates, StackDirection,
 };
+use crate::starter_pack_core::{
+  starter_packs_for_soul as core_starter_packs_for_soul,
+};
+
+/// Look up an aspect by id. Returns the `Aspect` object (with `id`,
+/// `name`, `description`, `icon`, `group` fields) or `null` for
+/// `ASPECT_NONE` (id 0) and unknown ids. Throws on registry-build
+/// failure.
+#[wasm_bindgen(js_name = aspectInfo)]
+pub fn aspect_info(id: u8) -> Result<JsValue, JsValue> {
+  let opt = core_aspect(id).map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(a) => serde_wasm_bindgen::to_value(a)
+      .map_err(|e| JsValue::from_str(&e.to_string())),
+    None => Ok(JsValue::NULL),
+  }
+}
 
 /// Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
 /// into a `CardDefinition`-shaped JS object. Returns `null` if no card
@@ -55,6 +74,20 @@ pub fn is_hex_type(type_id: u8) -> Result<bool, JsValue> {
   core_is_hex_type(type_id).map_err(|e| JsValue::from_str(&e))
 }
 
+/// Look up the display label for a packed definition in the given
+/// language, e.g. `cardLabel(packed, "en")` → `"Log"`. Falls back to
+/// English when `lang` has no entry. Returns `undefined` for unknown
+/// packed ids or locale entries with no label. Throws on registry-build
+/// failure. Callers should fall back to `def.key` on `undefined`.
+#[wasm_bindgen(js_name = cardLabel)]
+pub fn card_label(packed_def: u16, lang: &str) -> Result<Option<String>, JsValue> {
+  let path = core_card_locale_path(packed_def).map_err(|e| JsValue::from_str(&e))?;
+  let Some(path) = path else { return Ok(None) };
+  let label = crate::locales_core::label("cards", lang, &path)
+    .map_err(|e| JsValue::from_str(&e))?;
+  Ok(label.map(String::from))
+}
+
 /// Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
 /// `"position_locked"`, `"dead"`). Returns `undefined` if no flag with
 /// that name is declared in `cards/flags.json`. Throws on registry-build
@@ -63,6 +96,16 @@ pub fn is_hex_type(type_id: u8) -> Result<bool, JsValue> {
 #[wasm_bindgen(js_name = cardFlagBit)]
 pub fn card_flag_bit(name: &str) -> Result<Option<u8>, JsValue> {
   core_card_flag_bit(name).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
+/// `"tile"`). Returns `undefined` for unknown names. Source of truth
+/// is `content/cards/types.json`. Used by JS-side code that needs to
+/// branch on a card's type (without hard-coding the numeric id).
+#[wasm_bindgen(js_name = cardTypeId)]
+pub fn card_type_id(name: &str) -> Result<Option<u8>, JsValue> {
+  let ids = crate::definition_core::card_type_ids().map_err(|e| JsValue::from_str(&e))?;
+  Ok(ids.get(name).copied())
 }
 
 /// Read the value of a multi-bit card-flag field (e.g.
@@ -168,4 +211,19 @@ fn decode_def_pool(packed: &[u16]) -> Result<Vec<&'static CardDefinition>, JsVal
     }
   }
   Ok(out)
+}
+
+/// All starter packs registered for a given soul card key (e.g.
+/// `"human"`). Returns an array of `StarterPack` objects (`id`,
+/// `soul`, `packId`, `contents: [{cardKey, packedDefinition,
+/// count}]`). Empty array for unknown soul keys. Throws on
+/// registry-build failure.
+///
+/// Used by the character-create panel to enumerate which packs the
+/// player can pick from. JS-side filtering by soul is unnecessary
+/// since this is already soul-scoped at the call site.
+#[wasm_bindgen(js_name = starterPacksForSoul)]
+pub fn starter_packs_for_soul(soul: &str) -> Result<JsValue, JsValue> {
+  let packs = core_starter_packs_for_soul(soul).map_err(|e| JsValue::from_str(&e))?;
+  serde_wasm_bindgen::to_value(&packs).map_err(|e| JsValue::from_str(&e.to_string()))
 }

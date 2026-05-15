@@ -17,7 +17,7 @@
     "faculty":        { "id": 5,  "visibility": "private", "shape": "rect", "_comment": "Action modifiers — soul-bound." },
     "soul":           { "id": 6,  "visibility": "private", "shape": "rect", "_comment": "Player identity." },
     "tile":           { "id": 7,  "visibility": "private", "shape": "hex",  "_comment": "Per-hex override of the zone's packed tile data. Renamed from 'tile'." },
-    "tile_object":    { "id": 8,  "visibility": "private", "shape": "rect", "_comment": "World occupant (Tree, Rock). Never in inventory." },
+    "mini_zone":      { "id": 8,  "visibility": "private", "shape": "rect", "_comment": "Anchor for a mobile zone (radius-3 hex disk, 37 cells) stored at (surface=63, macro_zone=this card's card_id). Renamed from 'tile_object'. The anchor card itself lives at surface=64 on a world hex; its mini_zone holds tiles and may carry other cards on its tiles. Owner of the Zone row (Zone.owner_id) is the player who deployed it; ProductOwner::Hex products inherit from that owner directly. See spacetime/server/spacetimedb/src/mini_zone.rs for deploy/pickup mechanics." },
     "tile_decorator": { "id": 9,  "visibility": "private", "shape": "hex",  "_comment": "Visual addition." },
     "event":          { "id": 10, "visibility": "public",  "shape": "hex",  "_comment": "Event tiles." }
   },

@@ -20,6 +20,14 @@ fn main() {
   let mut out = String::new();
   emit_list(&manifest_dir, "cards/data", "CARDS_FILES", &mut out);
   emit_list(&manifest_dir, "recipes/data", "RECIPES_FILES", &mut out);
+  emit_list(&manifest_dir, "starter_packs/data", "STARTER_PACKS_FILES", &mut out);
+  // Locale catalogs: `locales/<domain>/<lang>.json`. The `<domain>`
+  // matches a source-data tree name (`cards`, `recipes`, …); `<lang>`
+  // is a BCP-47-ish short code (`en`, future `fr`, etc.). The loader
+  // in `locales_core` parses the relative path back into the
+  // `(domain, lang)` pair, so adding a new domain folder or a new
+  // language file needs no source edit here.
+  emit_list(&manifest_dir, "locales", "LOCALES_FILES", &mut out);
 
   fs::write(&out_path, out)
     .unwrap_or_else(|e| panic!("write {}: {}", out_path.display(), e));
@@ -57,8 +65,14 @@ fn emit_list(manifest_dir: &Path, rel_dir: &str, const_name: &str, out: &mut Str
 /// removing files anywhere in the tree triggers a rebuild.
 fn collect_json(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
   println!("cargo:rerun-if-changed={}", dir.display());
-  let entries = fs::read_dir(dir)
-    .unwrap_or_else(|e| panic!("read_dir {}: {}", dir.display(), e));
+  let entries = match fs::read_dir(dir) {
+    Ok(it) => it,
+    // A missing root directory is fine — the subsystem simply has no
+    // data yet, so we emit an empty slice. Anything else (permission
+    // denied, etc.) still panics so the cause surfaces.
+    Err(e) if dir == root && e.kind() == std::io::ErrorKind::NotFound => return,
+    Err(e) => panic!("read_dir {}: {}", dir.display(), e),
+  };
   for entry in entries.flatten() {
     let Ok(ft) = entry.file_type() else { continue };
     let path = entry.path();

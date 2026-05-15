@@ -1,20 +1,14 @@
-[
-  {
-    "card_type": "tile",
-    "category": "default",
-    "cards": {
+{
+  "tile": {
+    "default": {
       "forest_1": {
-        "name": "Plains",
         "style": ["#799E50", "#0b1426", "#0b1426"],
-        "aspects": {},
-        "traits": {"cost": 10}
+        "traits": { "cost": 10 }
       },
       "forest_2": {
-        "name": "Forest",
         "style": ["#395C39", "#7fb377", "#0b1426"],
-        "aspects": {},
-        "traits": {"cost": 12}
+        "traits": { "cost": 12 }
       }
     }
   }
-]
+}

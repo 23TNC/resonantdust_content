@@ -1,6 +1,22 @@
 /* @ts-self-types="./resonantdust_content.d.ts" */
 
 /**
+ * Look up an aspect by id. Returns the `Aspect` object (with `id`,
+ * `name`, `description`, `icon`, `group` fields) or `null` for
+ * `ASPECT_NONE` (id 0) and unknown ids. Throws on registry-build
+ * failure.
+ * @param {number} id
+ * @returns {any}
+ */
+export function aspectInfo(id) {
+    const ret = wasm.aspectInfo(id);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
  * `"position_locked"`, `"dead"`). Returns `undefined` if no flag with
  * that name is declared in `cards/flags.json`. Throws on registry-build
@@ -42,6 +58,49 @@ export function cardFlagFieldValue(flags, name) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
+}
+
+/**
+ * Look up the display label for a packed definition in the given
+ * language, e.g. `cardLabel(packed, "en")` → `"Log"`. Falls back to
+ * English when `lang` has no entry. Returns `undefined` for unknown
+ * packed ids or locale entries with no label. Throws on registry-build
+ * failure. Callers should fall back to `def.key` on `undefined`.
+ * @param {number} packed_def
+ * @param {string} lang
+ * @returns {string | undefined}
+ */
+export function cardLabel(packed_def, lang) {
+    const ptr0 = passStringToWasm0(lang, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.cardLabel(packed_def, ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v2;
+    if (ret[0] !== 0) {
+        v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v2;
+}
+
+/**
+ * Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
+ * `"tile"`). Returns `undefined` for unknown names. Source of truth
+ * is `content/cards/types.json`. Used by JS-side code that needs to
+ * branch on a card's type (without hard-coding the numeric id).
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function cardTypeId(name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.cardTypeId(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === 0xFFFFFF ? undefined : ret[0];
 }
 
 /**
@@ -140,6 +199,29 @@ export function matchStackRecipe(hex_def, root_def, slot_defs, direction, root_a
     const ptr4 = passArray16ToWasm0(actor_below, wasm.__wbindgen_malloc);
     const len4 = WASM_VECTOR_LEN;
     const ret = wasm.matchStackRecipe(hex_def, root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * All starter packs registered for a given soul card key (e.g.
+ * `"human"`). Returns an array of `StarterPack` objects (`id`,
+ * `soul`, `packId`, `contents: [{cardKey, packedDefinition,
+ * count}]`). Empty array for unknown soul keys. Throws on
+ * registry-build failure.
+ *
+ * Used by the character-create panel to enumerate which packs the
+ * player can pick from. JS-side filtering by soul is unnecessary
+ * since this is already soul-scoped at the call site.
+ * @param {string} soul
+ * @returns {any}
+ */
+export function starterPacksForSoul(soul) {
+    const ptr0 = passStringToWasm0(soul, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starterPacksForSoul(ptr0, len0);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

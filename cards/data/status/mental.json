@@ -1,32 +1,19 @@
-[
-  {
-    "card_type": "revery",
-    "category": "default",
-    "cards": {
+{
+  "revery": {
+    "default": {
       "dread": {
-        "name": "Dread",
-        "style": ["#3a3a4a", "#ecd6aa", "#0b1426"],
-        "aspects": {},
-        "traits": {}
+        "style": ["#3a3a4a", "#ecd6aa", "#0b1426"]
       }
     }
   },
-  {
-    "card_type": "event",
-    "category": "default",
-    "cards": {
+  "event": {
+    "default": {
       "despair": {
-        "name": "Despair",
-        "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
-        "aspects": {},
-        "traits": {}
+        "style": ["#3a3a4a", "#2a2a3a", "#0b1426"]
       },
       "strike": {
-        "name": "Strike",
-        "style": ["#3a3a4a", "#2a2a3a", "#0b1426"],
-        "aspects": {},
-        "traits": {}
+        "style": ["#3a3a4a", "#2a2a3a", "#0b1426"]
       }
     }
   }
-]
+}

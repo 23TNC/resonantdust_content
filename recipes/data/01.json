@@ -1,166 +1,145 @@
-[
-  {
-    "type": "stack",
-    "up": [
-      {
-        "id": "tripple_corpus",
-        "slots": [
-            ["corpus"],
-            ["corpus"],
-            ["corpus"]
-        ],
-        "reagents": [1],
-        "duration": 10,
-        "style": 2
-      },
-      {
-        "id": "dread_remover",
-        "slots": [
-            ["dread"],
-            ["dread"]
-        ],
-        "reagents": [1, 2],
-        "duration": 10,
-        "style": 1
-      },
-      {
-        "id": "corpus_up",
-        "slots": [
-            ["corpus"],
-            ["corpus"]
-        ],
-        "reagents": [1],
-        "output_success": { "inventory": { "root": ["corpus-"] } },
-        "duration": 10,
-        "style": 2
-      }
-    ],
-    "down": [
-      {
-        "id": "corpus_down_aspect",
-        "slots": [
-            ["corpus", 1],
-            ["corpus"]
-        ],
-        "reagents": [1],
-        "duration": 10,
-        "style": 2
-      },
-      {
-        "id": "corpus_down",
-        "slots": [
-            ["corpus"],
-            ["corpus"]
-        ],
-        "reagents": [1],
-        "output_success": { "inventory": { "root": ["corpus"] } },
-        "duration": 10,
-        "style": 2
-      }
-    ]
-  },
-  {
-    "type": "on_create",
-    "self": [
-      {
-        "id": "corpus-",
-        "root": ["corpus-"],
-        "reagents": ["root"],
-        "output_success": { "inventory": { "actor": ["corpus"] } },
-        "duration": 30,
-        "style": 2
-      },
-      {
-        "id": "fleeting",
-        "root": [["fleeting", 1]],
-        "reagents": ["root"],
-        "duration": 
-        [
-            [20, [["fleeting", 4]]],
-            [15, [["fleeting", 3]]],
-            [10, [["fleeting", 2]]],
-            5
-        ],
-        "style": 2
-      }
-    ],
-    "magnetic": [
-      {
-        "id": "despair",
-        "hex": ["despair"],
-        "set_start": { 
-          "hex": {"drop_locked": true, "surface_locked": true} 
-        },
-        "magnetic_success": "magnetic.up.despair_success",
-        "magnetic_failure": "magnetic.up.despair_failure",
-        "duration": 60,
-        "delay": 10,
-        "interval": 2,
-        "style": 1
-      },
-      {
-        "id": "strike",
-        "hex": ["strike"],
-        "set_start": { 
-          "hex": {"drop_locked": true, "surface_locked": true} 
-        },
-        "magnetic_success": "magnetic.up.strike_success",
-        "magnetic_failure": "magnetic.up.strike_failure",
-        "duration": 60,
-        "delay": 10,
-        "interval": 2,
-        "style": 1
-      }
-    ]
-  },
-  {
-    "type": "magnetic",
-    "up": [
-      {
-        "id": "despair_success",
-        "hex": ["despair"],
-        "root": ["dread"],
-        "reagents": ["hex", "root"],
-        "set_start": {
-          "root": {"drop_hold": true, "position_hold": true} 
-        },
-        "output_success": { "inventory": { "hex": ["corpus"] } },
-        "duration": 10,
-        "style": 1
-      },
-      {
-        "id": "despair_failure",
-        "hex": ["despair"],
-        "reagents": ["hex"],
-        "set_start": {},
-        "output_success": { "inventory": { "hex": ["dread"] } },
-        "duration": 10,
-        "style": 1
-      },
-      {
-        "id": "strike_success",
-        "hex": ["strike"],
+{
+  "stack": {
+    "up": {
+      "triple_corpus": {
         "slots": ["corpus", "corpus", "corpus"],
-        "reagents": ["hex", 1, 2, 3],
-        "set_start": {
-          "root": {"drop_hold": true, "position_hold": true} 
-        },
-        "output_success": { "inventory": { "root": ["corpus-", "corpus-", "corpus-"] } },
+        "reagents": { "slots": [0] },
         "duration": 10,
-        "style": 1
+        "style": "rtl"
       },
-      {
-        "id": "strike_failure",
-        "hex": ["strike"],
-        "reagents": ["hex"],
-        "set_start": {},
-        "output_success": { "inventory": { "hex": ["dread"] } },
+      "dread_remover": {
+        "slots": ["dread", "dread"],
+        "reagents": { "slots": [0, 1] },
         "duration": 10,
-        "style": 1
+        "style": "ltr"
+      },
+      "corpus_up": {
+        "slots": ["corpus", "corpus"],
+        "reagents": { "slots": [0] },
+        "output": { "inventory": { "root": ["corpus-"] } },
+        "duration": 10,
+        "style": "rtl"
       }
-    ],
-    "down": [
-      
-    ]
+    },
+    "down": {
+      "corpus_down_aspect": {
+        "slots": [
+          { "aspect": "corpus", "min": 1 },
+          "corpus"
+        ],
+        "reagents": { "slots": [0] },
+        "duration": 10,
+        "style": "rtl"
+      },
+      "corpus_down": {
+        "slots": ["corpus", "corpus"],
+        "reagents": { "slots": [0] },
+        "output": { "inventory": { "root": ["corpus"] } },
+        "duration": 10,
+        "style": "rtl"
+      }
+    }
+  },
+
+  "on_create": {
+    "self": {
+      "corpus-": {
+        "root": "corpus-",
+        "reagents": { "roles": ["root"] },
+        "output": { "inventory": { "actor": ["corpus"] } },
+        "duration": 30,
+        "style": "rtl"
+      },
+      "fleeting": {
+        "root": { "aspect": "fleeting", "min": 1 },
+        "reagents": { "roles": ["root"] },
+        "duration": [
+          { "when": { "aspect": "fleeting", "min": 4 }, "seconds": 20 },
+          { "when": { "aspect": "fleeting", "min": 3 }, "seconds": 15 },
+          { "when": { "aspect": "fleeting", "min": 2 }, "seconds": 10 },
+          { "seconds": 5 }
+        ],
+        "style": "rtl"
+      }
+    },
+    "magnetic": {
+      "despair": {
+        "hex": "despair",
+        "set": {
+          "start": {
+            "hex": { "drop_locked": true, "surface_locked": true }
+          }
+        },
+        "magnetic": {
+          "success": "magnetic.up.despair_success",
+          "failure": "magnetic.up.despair_failure"
+        },
+        "duration": 60,
+        "delay": 10,
+        "interval": 2,
+        "style": "ltr"
+      },
+      "strike": {
+        "hex": "strike",
+        "set": {
+          "start": {
+            "hex": { "drop_locked": true, "surface_locked": true }
+          }
+        },
+        "magnetic": {
+          "success": "magnetic.up.strike_success",
+          "failure": "magnetic.up.strike_failure"
+        },
+        "duration": 60,
+        "delay": 10,
+        "interval": 2,
+        "style": "ltr"
+      }
+    }
+  },
+
+  "magnetic": {
+    "up": {
+      "despair_success": {
+        "hex": "despair",
+        "root": "dread",
+        "reagents": { "roles": ["hex", "root"] },
+        "set": {
+          "start": {
+            "root": { "drop_hold": true }
+          }
+        },
+        "output": { "inventory": { "hex": ["corpus"] } },
+        "duration": 10,
+        "style": "ltr"
+      },
+      "despair_failure": {
+        "hex": "despair",
+        "reagents": { "roles": ["hex"] },
+        "output": { "inventory": { "hex": ["dread"] } },
+        "duration": 10,
+        "style": "ltr"
+      },
+      "strike_success": {
+        "hex": "strike",
+        "slots": ["corpus", "corpus", "corpus"],
+        "reagents": { "slots": [0, 1, 2], "roles": ["hex"] },
+        "set": {
+          "start": {
+            "root": { "drop_hold": true }
+          }
+        },
+        "output": { "inventory": { "root": ["corpus-", "corpus-", "corpus-"] } },
+        "duration": 10,
+        "style": "ltr"
+      },
+      "strike_failure": {
+        "hex": "strike",
+        "reagents": { "roles": ["hex"] },
+        "output": { "inventory": { "hex": ["dread"] } },
+        "duration": 10,
+        "style": "ltr"
+      }
+    }
   }
-]
+}

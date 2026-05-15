@@ -1,0 +1,104 @@
+{
+  "requisite": {
+    "default": {
+      "log": {
+        "label": "Log",
+        "description": {
+          "simple": "Just a wooden log."
+        }
+      },
+      "stone": {
+        "label": "Stone",
+        "description": {
+          "simple": "A common stone."
+        }
+      },
+      "axe": {
+        "label": "Axe"
+      },
+      "pickaxe": {
+        "label": "Pickaxe"
+      }
+    }
+  },
+  "event": {
+    "default": {
+      "despair": {
+        "label": "Despair"
+      },
+      "strike": {
+        "label": "Strike"
+      }
+    }
+  },
+  "faculty": {
+    "default": {
+      "aether": {
+        "label": "Aether"
+      },
+      "aether+": {
+        "label": "Aether+"
+      },
+      "aether-": {
+        "label": "Aether-"
+      },
+      "anima": {
+        "label": "Anima"
+      },
+      "anima+": {
+        "label": "Anima+"
+      },
+      "anima-": {
+        "label": "Anima-"
+      },
+      "corpus": {
+        "label": "Corpus"
+      },
+      "corpus+": {
+        "label": "Corpus+"
+      },
+      "corpus-": {
+        "label": "Corpus-"
+      },
+      "sollertia": {
+        "label": "Sollertia"
+      },
+      "sollertia+": {
+        "label": "Sollertia+"
+      },
+      "sollertia-": {
+        "label": "Sollertia-"
+      }
+    }
+  },
+  "revery": {
+    "default": {
+      "dread": {
+        "label": "Dread"
+      }
+    }
+  },
+  "soul": {
+    "default": {
+      "human": {
+        "label": "Human"
+      }
+    }
+  },
+  "tile": {
+    "default": {
+      "forest_1": {
+        "label": "Forest 1"
+      },
+      "forest_2": {
+        "label": "Forest 2"
+      },
+      "rock": {
+        "label": "Rock"
+      },
+      "tree": {
+        "label": "Tree"
+      }
+    }
+  }
+}

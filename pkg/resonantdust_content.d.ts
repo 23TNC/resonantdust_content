@@ -2,6 +2,14 @@
 /* eslint-disable */
 
 /**
+ * Look up an aspect by id. Returns the `Aspect` object (with `id`,
+ * `name`, `description`, `icon`, `group` fields) or `null` for
+ * `ASPECT_NONE` (id 0) and unknown ids. Throws on registry-build
+ * failure.
+ */
+export function aspectInfo(id: number): any;
+
+/**
  * Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
  * `"position_locked"`, `"dead"`). Returns `undefined` if no flag with
  * that name is declared in `cards/flags.json`. Throws on registry-build
@@ -23,6 +31,23 @@ export function cardFlagBit(name: string): number | undefined;
  * compare directly.
  */
 export function cardFlagFieldValue(flags: number, name: string): number | undefined;
+
+/**
+ * Look up the display label for a packed definition in the given
+ * language, e.g. `cardLabel(packed, "en")` → `"Log"`. Falls back to
+ * English when `lang` has no entry. Returns `undefined` for unknown
+ * packed ids or locale entries with no label. Throws on registry-build
+ * failure. Callers should fall back to `def.key` on `undefined`.
+ */
+export function cardLabel(packed_def: number, lang: string): string | undefined;
+
+/**
+ * Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
+ * `"tile"`). Returns `undefined` for unknown names. Source of truth
+ * is `content/cards/types.json`. Used by JS-side code that needs to
+ * branch on a card's type (without hard-coding the numeric id).
+ */
+export function cardTypeId(name: string): number | undefined;
 
 /**
  * Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
@@ -75,20 +100,38 @@ export function isHexType(type_id: number): boolean;
  */
 export function matchStackRecipe(hex_def: number, root_def: number, slot_defs: Uint16Array, direction: number, root_above: Uint16Array, actor_above: Uint16Array, root_below: Uint16Array, actor_below: Uint16Array): any;
 
+/**
+ * All starter packs registered for a given soul card key (e.g.
+ * `"human"`). Returns an array of `StarterPack` objects (`id`,
+ * `soul`, `packId`, `contents: [{cardKey, packedDefinition,
+ * count}]`). Empty array for unknown soul keys. Throws on
+ * registry-build failure.
+ *
+ * Used by the character-create panel to enumerate which packs the
+ * player can pick from. JS-side filtering by soul is unnecessary
+ * since this is already soul-scoped at the call site.
+ */
+export function starterPacksForSoul(soul: string): any;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly aspectInfo: (a: number) => [number, number, number];
     readonly cardFlagBit: (a: number, b: number) => [number, number, number];
     readonly cardFlagFieldValue: (a: number, b: number, c: number) => [number, number, number];
+    readonly cardLabel: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly cardTypeId: (a: number, b: number) => [number, number, number];
     readonly decodeDefinition: (a: number) => [number, number, number];
     readonly findPackedByKey: (a: number, b: number) => [number, number, number];
     readonly isHexType: (a: number) => [number, number, number];
     readonly matchStackRecipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number];
+    readonly starterPacksForSoul: (a: number, b: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

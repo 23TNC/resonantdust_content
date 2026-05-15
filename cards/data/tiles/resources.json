@@ -1,20 +1,14 @@
-[
-  {
-    "card_type": "tile",
-    "category": "default",
-    "cards": {
+{
+  "tile": {
+    "default": {
       "tree": {
-        "name": "Tree",
         "style": ["#4A7C3A", "#3D2818", "#0b1426"],
-        "aspects": {},
-        "traits": {"cost": 30}
+        "traits": { "cost": 30 }
       },
       "rock": {
-        "name": "Rock",
         "style": ["#8A857C", "#2A2A2A", "#0b1426"],
-        "aspects": {},
-        "traits": {"cost": 30}
+        "traits": { "cost": 30 }
       }
     }
   }
-]
+}

@@ -1,43 +1,23 @@
-[
-  {
-    "type": "stack",
-    "up": [
-      {
-        "id": "cut_tree",
-        "hex": ["tree"],
-        "slots": [
-            ["corpus"]
-        ],
-        "has": {
-          "actor": [["axe"]]
-        },
-        "reagents": ["hex", 1],
-        "output_success": { "inventory": { "actor": ["corpus-", "log"] } },
+{
+  "stack": {
+    "up": {
+      "cut_tree": {
+        "hex": "tree",
+        "slots": ["corpus"],
+        "has": { "actor": ["axe"] },
+        "reagents": { "slots": [0], "roles": ["hex"] },
+        "output": { "inventory": { "actor": ["corpus-", "log"] } },
         "duration": 10,
-        "style": 2
+        "style": "rtl"
       },
-      {
-        "id": "break_rock",
-        "hex": ["rock"],
-        "slots": [
-            ["corpus"]
-        ],
-        "reagents": { "slots": ["hex", 1] },
-        "output_success": { "inventory": { "actor": ["corpus-", "stone"] } },
+      "break_rock": {
+        "hex": "rock",
+        "slots": ["corpus"],
+        "reagents": { "slots": [0], "roles": ["hex"] },
+        "output": { "inventory": { "actor": ["corpus-", "stone"] } },
         "duration": 10,
-        "style": 2
+        "style": "rtl"
       }
-    ],
-    "down": []
-  },
-  {
-    "type": "on_create",
-    "self": [],
-    "magnetic": []
-  },
-  {
-    "type": "magnetic",
-    "up": [],
-    "down": []
+    }
   }
-]
+}

@@ -1,95 +1,210 @@
 # content/cards/
 
 Card data — consumed by both the SpacetimeDB server (Rust) and the pixijs
-client.
+client. Loaded by [`src/definition_core.rs`](../src/definition_core.rs).
 
 ## Layout
 
 ```
 cards/
-  types.json     # card_type / card_category id registry
-  aspects.json   # aspect catalog (1-indexed across groups)
-  flags.json     # bit-position registry for cards.flags
-  id.json        # stable definition_id per (type, category, key) — generated
-  data/          # card definition files
-    01.json
-    02.json
-    ...
+  types.json       # card_type / card_category registry (with shape + visibility)
+  aspects.json     # aspect catalog (i32-valued, 1-indexed across groups)
+  traits.json      # trait catalog  (f32-valued, 1-indexed across groups)
+  flags.json       # bit-position registry for cards.flags u32
+  id.json          # stable definition_id per (type, category, key) — generated
+  data/            # card definition tree, auto-discovered by build.rs
+    requisites/    # equipment.json, resources.json
+    souls/         # human.json
+    status/        # mental.json, stats.json
+    tiles/         # forest.json, resources.json
+  disciplines/     # LEGACY — old-format file, not auto-loaded
 ```
 
-## File format
+Everything under `data/` is auto-discovered recursively. Subdirectory
+names are organisational — the loader doesn't care. **Display labels
+are NOT in this tree** — they live under
+[`../locales/cards/<lang>.json`](../locales/cards/).
 
-Every file in [`data/`](data/) is a top-level **array of bucket objects**.
-Each bucket pins one `(card_type, category)` pair and lists the cards
-belonging to it:
+## File format (cards/data/**/*.json)
 
-```json
-[
-  {
-    "card_type": "discipline",
-    "category": "default",
-    "cards": {
-      "attack": [ "Attack",
-        ["#E67E7E", "#ecd6aa", "#0b1426"],
-        [["combat", 3], ["chaos", 1]]
-      ],
-      "work":   [ "Work",
-        ["#97e3a7", "#ecd6aa", "#0b1426"],
-        [["labor", 3], ["craft", 2], ["order", 1]]
-      ]
-    }
-  },
-  // … more buckets …
-]
-```
-
-### Bucket fields
-
-| Field | Type | Notes |
-| --- | --- | --- |
-| `card_type` | string | Must match a key in [`types.json`](types.json)'s `types` map (singular form). Resolves to the `u4` `card_type` half of `packed_definition`. |
-| `category` | string | Must match a key in `types.json`'s `categories` map. Currently only `"default"` exists. Resolves to the `u4` `card_category` half. |
-| `cards` | object | Map from card-key (string) → card spec (3-tuple array). |
-
-### Card spec
-
-Each value in the `cards` map is a 3-element JSON array:
-
-```
-[ display_name, style, aspects ]
-```
-
-- **`display_name`** (string): rendered name, e.g. `"Attack"`. Title case
-  is conventional.
-- **`style`** (`[string, string, string]`): three CSS hex colors
-  (`#RRGGBB`, lowercase or uppercase, exactly 6 hex digits). Validated at
-  registry build — invalid hex produces a stored registry error. Used by
-  the renderer; the server doesn't otherwise interpret them.
-- **`aspects`** (array of `[name, value]` pairs): the aspect contributions
-  this card provides. Each `name` must be declared in
-  [`aspects.json`](aspects.json) — unknown aspects are a build-time
-  error. Values are signed 32-bit integers (typically small positive
-  numbers; nothing currently uses negatives).
-
-## Stable definition IDs
-
-Each card's `definition_id` is a stable u8 assigned in
-[`id.json`](id.json):
+Each file is a nested object: `card_type → category → card_key → spec`.
 
 ```json
 {
-  "discipline": {
+  "soul": {
     "default": {
-      "attack": 1,
-      "work": 2,
-      "study": 3
+      "human": {
+        "style": ["#a8e0e6", "#ecd6aa", "#0b1426"],
+        "aspects": { "mind": 2, "body": 2, "soul": 2, "skill": 1, "order": 1 },
+        "traits":  { "speed": 12 }
+      }
+    }
+  }
+}
+```
+
+One file can carry multiple types or categories — every top-level key
+must be a known `card_type` in [`types.json`](types.json) and every
+second-level key a known `card_category`. **Unknown `(type, category)`
+pairs are silently skipped** at registry build, so content files can
+outpace the registry; a typo just won't produce a decodable card.
+
+### Card spec fields
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `style` | yes | `[string, string, string]` — three CSS hex colors (`#RRGGBB`, lowercase or uppercase, exactly 6 hex digits). Validated at registry build; invalid hex produces a stored registry error. Used by the renderer; the server doesn't otherwise interpret them. |
+| `aspects` | no | Map `aspect_name → i32 value`. Every name must be declared in [`aspects.json`](aspects.json) — unknown aspects are a hard build error. Default `{}`. |
+| `traits` | no | Map `trait_name → number`. Every name must be declared in [`traits.json`](traits.json) — unknown traits are a hard build error. Values are parsed as `f64` and stored as `f32` (so `1`, `1.0`, and `1.2` all round-trip cleanly). Default `{}`. |
+
+The spec object must be present even if empty (just `{}`), but
+`aspects` / `traits` can be omitted entirely — most cards declare
+neither.
+
+There is **no `name` / `display_name` field** in the card JSON. Display
+labels are resolved at runtime via the locale registry — see
+[Display labels](#display-labels) below.
+
+### Aspects vs traits — when to use which
+
+- **Aspects** are `i32`, aggregable across a stack (the action machinery
+  sums aspect contributions across every claimed card in a chain). Used
+  for recipe predicates (`{"aspect": "labor", "min": 1}`), duration
+  tiers (more `fleeting` → faster expiry), and any "this much of X" axis.
+- **Traits** are `f32`, scoped to a single card (`def.trait_value(id)`
+  returns the card's own value or `None`). Used for non-aggregating
+  per-card facts: a tile's movement `cost`, a soul's per-turn `speed`.
+  Never summed across a chain.
+
+If in doubt: does it make sense to add two cards' values together?
+Aspect. If not: trait.
+
+## cards/types.json
+
+```json
+{
+  "_rules": {
+    "public_max_id":     3,
+    "max_id":            15,
+    "subscription_mask": "packed_definition < 0x4000 → public types only",
+    "shapes":            ["rect", "hex"]
+  },
+  "types": {
+    "requisite": { "id": 0, "visibility": "public",  "shape": "rect" },
+    "tile":      { "id": 7, "visibility": "private", "shape": "hex"  },
+    ...
+  },
+  "categories": {
+    "default": { "id": 0 }
+  }
+}
+```
+
+Per-type fields:
+
+| Field | Notes |
+| --- | --- |
+| `id` | u4, `[0, 15]`. Goes into the high nibble of `packed_definition`. Append-only — never recycle an id. |
+| `visibility` | `"public"` (id `[0, 3]`) or `"private"` (id `[4, 15]`). Enforced by SpacetimeDB subscription filters: public rows are visible cross-player for trade subscriptions; private rows are owner-only. The numeric cutoff lives in `_rules.public_max_id` and is materialised on the wire as `packed_definition < 0x4000`. |
+| `shape` | `"rect"` or `"hex"`. Drives [`is_hex_type`](../src/definition_core.rs); rect types stack into card chains, hex types are anchors that rect roots attach to via `stacked_state == OnHex`. Missing field defaults to rect on the read path, but always declare it explicitly. |
+| `_comment` | Optional — describes what the type is for. |
+
+`_reserved_<n>` entries hold a numeric id slot for a future type
+without registering it as real. Bucket keys like `"_reserved_1"` will
+never resolve and the loader skips them.
+
+Categories follow the same pattern — only `"default"` exists today.
+Both types and categories occupy `u4` halves of `packed_definition`,
+so the `0x0F` cap is hard.
+
+## cards/aspects.json
+
+```json
+{
+  "resources": {
+    "_comment": "Raw and processed materials",
+    "labor": "Work or effort applied to a task",
+    "wood":  "Timber — logs, branches, raw lumber",
+    ...
+  },
+  "elements": { "earth": "...", "fire": "...", ... },
+  ...
+}
+```
+
+Top-level keys are organisational groups. Each group's children are
+`aspect_name → description` (string). Aspect IDs are assigned at build
+time in JSON insertion order **across all groups** (id 0 reserved as
+`ASPECT_NONE`). The crate ships with `serde_json`'s `preserve_order`
+feature enabled, so insertion order is the file order.
+
+## cards/traits.json
+
+Same shape as `aspects.json`, but values are `f32`. Today's catalog is
+small:
+
+```json
+{
+  "tile": {
+    "cost": "Movement cost paid to enter the tile."
+  },
+  "soul": {
+    "speed": "Movement allowance per turn."
+  }
+}
+```
+
+Trait IDs are 1-indexed across groups in insertion order (id 0
+reserved as `TRAIT_NONE`).
+
+## cards/flags.json
+
+Bit-position registry for `Card.flags` (u32). Two entry shapes:
+
+```json
+{
+  "cards": {
+    "drop_hold":      { "bit": 3,   "description": "..." },
+    "progress_style": { "bits": [8, 9, 10], "description": "..." }
+  }
+}
+```
+
+- `"bit": n` — single bit at position `n ∈ [0, 31]`. Surfaced via
+  [`card_flag_bit`](../src/flags_core.rs) → `Option<u8>`. JS-side
+  callers convert to a mask via `1 << bit`.
+- `"bits": [low, …, high]` — contiguous multi-bit field, ascending.
+  Surfaced via [`card_flag_field`](../src/flags_core.rs) →
+  `Option<FlagField { shift, width }>`. `FlagField::pack(value)` and
+  `FlagField::mask()` are the helpers; the JS API exposes the
+  read-value path via `cardFlagFieldValue(flags, name)`.
+
+Both shapes are append-only. Removed flags leave `_reserved_<bit>`
+tombstones so the bit can't be silently reused for unrelated meaning.
+
+The recipe parser resolves `{"flag": "<name>"}` entity predicates and
+`set.start.<role>.<flag>` operations through this file — a typo'd
+flag name is a hard build error.
+
+The file also has dormant `actions` / `magnetic_actions` sections that
+mirror the `cards` shape; they're not surfaced through the registry
+yet, but the file is the agreed home when they go live.
+
+## Stable definition IDs (cards/id.json)
+
+```json
+{
+  "soul": {
+    "default": {
+      "human": 1
     }
   },
-  "faculty": {
+  "tile": {
     "default": {
-      "corpus": 1,
-      "aether": 2,
-      ...
+      "forest_1": 1,
+      "forest_2": 2,
+      "tree":     3,
+      "rock":     4
     }
   },
   ...
@@ -98,12 +213,14 @@ Each card's `definition_id` is a stable u8 assigned in
 
 - IDs are u8 (1–255), scoped per `(card_type, category)`. **`0` is
   reserved as the sentinel "no card."**
-- IDs are assigned once and **never reassigned**. Adding a new card
-  appends a new id; removing one leaves a tombstone — the next-id
-  counter only ever increases, so reused names won't recycle ids.
-- The server combines `definition_id` with the bucket's `(card_type,
-  card_category)` at build time to produce the wire-format `u16`
-  `packed_definition`:
+- Generated by [`../gen-ids.py`](../gen-ids.py). Default-mode runs
+  reassign IDs on every invocation (fine while wire compatibility
+  doesn't matter); `--skip-known` preserves existing ids and only
+  appends new entries (the discipline you want once ids are baked
+  into save data).
+- The server combines `definition_id` with the bucket's
+  `(card_type, card_category)` at build time to produce the
+  wire-format `u16` `packed_definition`:
 
   ```
   bits 15..12 : card_type      (u4, from types.json)
@@ -111,80 +228,121 @@ Each card's `definition_id` is a stable u8 assigned in
   bits  7..0  : definition_id  (u8, from cards/id.json)
   ```
 
-`id.json` is generated by [`../gen-ids.py`](../gen-ids.py). Run it
-before `spacetime build` whenever you add or remove cards — the
-registry-build step refuses to load a card whose `(type, category, key)`
-isn't in `id.json` and errors with `not found in cards/id.json — run
-gen-ids.py`.
+- [`find_packed_by_key(key) → Option<u16>`](../src/definition_core.rs)
+  uses a flat `by_key` map populated from `id.json`, so recipe
+  products that name cards by bare key (`"fatigue"`, `"log"`) resolve
+  in O(log n) without scanning every bucket. When two types ever share
+  a key, the lookup returns whichever was inserted last — use
+  [`find_packed("type/key")`](../src/definition_core.rs) (which goes
+  through `by_path`) to disambiguate.
 
-The server-side lookup `find_packed_by_key(key) → packed_definition`
-uses a `by_key` map populated from `id.json`, so recipe products that
-name cards by bare key (`"fatigue"`, `"log"`) resolve in O(log n)
-without scanning every bucket.
+## Display labels
+
+Card display labels live in
+[`../locales/cards/<lang>.json`](../locales/), path-keyed by
+`<card_type>.<category>.<key>` matching the `cards/id.json` nesting:
+
+```json
+{
+  "requisite": {
+    "default": {
+      "log": {
+        "label": "Log",
+        "description": { "simple": "Just a wooden log." }
+      },
+      "axe": { "label": "Axe" }
+    }
+  }
+}
+```
+
+Each leaf object has a required `label` and optional nested fields like
+`description.simple` / `description.detailed`. Lookups go through
+[`locales_core::label("cards", lang, path)`](../src/locales_core.rs)
+with an English fallback (see
+[`../AGENTS.md`](../AGENTS.md#display-labels-and-the-locale-lookup-chain)).
+The wasm API exposes a one-shot `cardLabel(packed, lang)` that builds
+the path via [`card_locale_path`](../src/definition_core.rs) and
+dispatches.
+
+Cards without a locale entry render as their bare `key` — fine for
+prototyping, sloppy for shipping. `bin/content check` is the place to
+enforce coverage.
 
 ## Conventions
 
 - **Card keys**: lowercase `snake_case` (`"log"`, `"corpus"`,
   `"woodcutting_axe"` if it ever exists). Stable across renames of the
-  display `name`. Keys cannot be `"any"` (reserved as the recipe-side
+  display label. Keys cannot be `"any"` (reserved as the recipe-side
   wildcard sentinel) and cannot start with `@` (reserved as the
-  recipe-side card-type-match prefix).
-- **Display names**: title case (`"Log"`, `"Corpus"`).
+  recipe-side card-type-match prefix). Some current keys carry `+` /
+  `-` suffixes (`corpus+`, `corpus-`) — that's fine, the parser only
+  forbids the two reserved forms.
+- **Display labels**: title case (`"Log"`, `"Corpus"`) in the locale
+  file; not enforced, but recommended.
 - **Style**: 7-character `#RRGGBB`. Validator is strict — `#fff`
   shorthand is rejected.
-- **Aspects**: every aspect referenced must already exist in
-  `aspects.json`. Adding an aspect to a card without adding it to the
-  catalog is a build error.
+- **Aspects / traits**: every name referenced must already exist in
+  `aspects.json` / `traits.json`. Adding one to a card without adding
+  it to the catalog is a hard build error. The error message names the
+  file, card key, and unknown name.
 - **Cross-bucket key uniqueness**: not enforced by schema, but
-  recommended. Recipe products use bare card keys (`"fatigue"`); when
-  two buckets share a key, `find_packed_by_key` returns whichever was
-  inserted last — fine if intended but a silent surprise if not.
+  recommended. Recipe products use bare card keys; when two types
+  share a key, `find_packed_by_key` returns whichever was inserted
+  last — fine if intended, a silent surprise if not.
 
 ## Pitfalls
 
 - **Card key not in `cards/id.json`**: hard build error. Run
-  `gen-ids.py` after adding a new card.
+  `bin/content check` (or `python content/gen-ids.py` directly) after
+  adding a new card.
 - **Bucket type/category name mismatch with `types.json`**:
   silently skipped. The whole bucket disappears from the registry. If
-  a card "doesn't decode," check that the bucket's `card_type` is the
-  singular form declared in `types.json`.
+  a card "doesn't decode," check that the top-level key is the
+  singular form declared in `types.json`, and that `cards/id.json`
+  picked it up.
 - **Definition_id overflow**: a single `(type, category)` bucket can't
   hold more than 255 cards (registry build errors out). If you ever
   approach that, split into a new category — the bit layout supports
   16 categories per type.
-- **Aspect typos**: hard build errors. The error message names the
-  file, card key, and unknown aspect — fix `aspects.json` or the typo.
+- **Aspect / trait typos**: hard build errors. The error message names
+  the file, card key, and unknown name — fix `aspects.json` /
+  `traits.json` or the typo.
 - **Color validation**: `"red"`, `"#fff"`, `"FFFFFF"` (no `#`) all
   fail. Always full `#RRGGBB`.
+- **Duplicate aspect / trait on one card**: hard build error.
 - **Reserved card keys**: `"any"` and any key starting with `@` would
   collide with recipe-side reserved sentinels. Today no card data
   trips this; if you ever add one, rename the card.
-
-## Loader
-
-- **Server**: [`definitions.rs`](../../spacetime/server/spacetimedb/src/definitions.rs)
-  — `build_cards` / `parse_card`. New files MUST be added to the
-  `CARDS_FILES` const tuple.
-- **Client**: TBD (pixijs).
+- **`cards/disciplines/`** holds a stale pre-rewrite-format file. It
+  isn't loaded; treat the directory as legacy until cleaned up.
 
 ## Adding a new card
 
-1. Pick the right bucket in an existing file, or add a new bucket.
-2. Add a new entry to the `cards` map (anywhere — the JSON order no
-   longer determines `definition_id`).
-3. Make sure every aspect named in the new card's aspect list exists in
-   `aspects.json`. Add it there first if not.
-4. Run `bin/content check` (or `python content/gen-ids.py` directly) to
-   assign the new card a stable `definition_id` in `cards/id.json`.
-5. If it's a new file, add `("cards/data/NN.json", include_str!("../cards/data/NN.json"))`
-   to `CARDS_FILES` in [`../src/definition_core.rs`](../src/definition_core.rs).
+1. Pick the right `(card_type, category)` bucket in an existing file
+   under [`data/`](data/), or add a new file anywhere under it.
+2. Add the spec object — at minimum a `style`, plus optional `aspects`
+   / `traits`.
+3. Make sure every aspect / trait name in the spec already exists in
+   `aspects.json` / `traits.json`. Add it there first if not.
+4. Run `bin/content check` to assign a stable `definition_id` in
+   `cards/id.json` and verify the registry builds.
+5. Add a label to [`../locales/cards/en.json`](../locales/cards/en.json)
+   under the matching `<type>.<category>.<key>` path. Without it the
+   card renders as its bare key.
+
+No `CARDS_FILES` constant to update — [`build.rs`](../build.rs)
+auto-discovers files in `data/**/*.json`.
 
 ## Adding a new card type
 
 1. Add a new entry to `types.json`'s `types` map. Pick an unused id
-   in `[0, 0xF]`.
-2. Decide visibility (public/private) and shape (rect/hex) — see
-   `_rules` / `_comment` in `types.json`.
-3. Create or extend a bucket in `cards/data/*.json` whose `card_type` matches
-   the new singular name.
-4. Run `gen-ids.py` to seed `cards/id.json` for the new type.
+   in `[0, 0xF]`. Set `visibility` and `shape` deliberately.
+2. Create or extend a bucket in `cards/data/**/*.json` whose top-level
+   key matches the new singular name.
+3. Run `bin/content check` to seed `cards/id.json` for the new type and
+   verify the registry builds.
+4. If the type is `"hex"`-shaped and should participate in stack
+   chains, mirror it in the server-side stacking logic — the content
+   crate only labels the shape; the server enforces what attaches to
+   what.

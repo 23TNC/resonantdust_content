@@ -20,20 +20,27 @@
 //! - [`recipe_core`]   recipe registry, built lazily from the JSON catalogs
 //!                   in `content/recipes/`. Resolves `"@<type>"` entities and
 //!                   aspect names through `definition_core`.
+//! - [`starter_pack_core`] starter-pack registry, built lazily from
+//!                   `content/starter_packs/`. Each pack is a soul-scoped
+//!                   bundle of card-key → count pairs; card keys are
+//!                   resolved through `definition_core`.
 
 pub mod packed;
 pub mod definition_core;
 pub mod recipe_core;
+pub mod starter_pack_core;
 pub mod flags_core;
+pub mod locales_core;
 
 #[cfg(feature = "js")]
 mod wasm_api;
 
-/// `(rel_path, contents)` slices for every `*.json` under `cards/data/` and
-/// `recipes/data/`, populated at compile time by `build.rs`. The registries
-/// iterate these instead of hard-coding filenames, so adding / removing /
-/// renaming a data file needs no source edit — cargo notices via the
-/// build script's `rerun-if-changed` hooks and the slice regenerates.
+/// `(rel_path, contents)` slices for every `*.json` under `cards/data/`,
+/// `recipes/data/`, and `starter_packs/data/`, populated at compile time by
+/// `build.rs`. The registries iterate these instead of hard-coding filenames,
+/// so adding / removing / renaming a data file needs no source edit — cargo
+/// notices via the build script's `rerun-if-changed` hooks and the slice
+/// regenerates.
 mod embedded_data {
   include!(concat!(env!("OUT_DIR"), "/data_files.rs"));
 }

@@ -3,60 +3,60 @@
 
   "resources": {
     "_comment": "Raw and processed materials",
-    "labor":  "Work or effort applied to a task",
-    "wood":   "Timber — logs, branches, raw lumber",
-    "stone":  "Rock, ore, mineral material",
-    "metal":  "Processed or smelted metallic material",
-    "food":   "Sustenance, edible produce",
-    "fuel":   "Combustible energy source (wood, coal, oil, etc.)"
+    "labor":  { "icon": "⚒", "description": "Work or effort applied to a task" },
+    "wood":   { "icon": "🪵", "description": "Timber — logs, branches, raw lumber" },
+    "stone":  { "icon": "🪨", "description": "Rock, ore, mineral material" },
+    "metal":  { "icon": "🔩", "description": "Processed or smelted metallic material" },
+    "food":   { "icon": "🌾", "description": "Sustenance, edible produce" },
+    "fuel":   { "icon": "🕯", "description": "Combustible energy source (wood, coal, oil, etc.)" }
   },
 
   "elements": {
     "_comment": "Classical elemental forces",
-    "earth": "Stability, physicality, growth",
-    "water": "Flow, change, nourishment",
-    "fire":  "Energy, destruction, transformation",
-    "wind":  "Speed, freedom, breath",
-    "light": "Illumination, order, clarity",
-    "dark":  "Shadow, entropy, concealment"
+    "earth": { "icon": "⛰", "description": "Stability, physicality, growth" },
+    "water": { "icon": "💧", "description": "Flow, change, nourishment" },
+    "fire":  { "icon": "🔥", "description": "Energy, destruction, transformation" },
+    "wind":  { "icon": "💨", "description": "Speed, freedom, breath" },
+    "light": { "icon": "☀", "description": "Illumination, order, clarity" },
+    "dark":  { "icon": "🌑", "description": "Shadow, entropy, concealment" }
   },
 
   "alignment": {
     "_comment": "Moral or cosmic orientation",
-    "order": "Structure, law, discipline",
-    "chaos": "Randomness, freedom, disruption"
+    "order": { "icon": "⚖", "description": "Structure, law, discipline" },
+    "chaos": { "icon": "🌀", "description": "Randomness, freedom, disruption" }
   },
 
   "faculties": {
     "_comment": "The four inner faculties — mirror the faculty card ids",
-    "corpus":    "The body — physical capacity and health",
-    "sollertia": "Skill and cleverness — trained capability",
-    "anima":     "The animating soul — will and spirit",
-    "aether":    "Subtle or magical essence"
+    "corpus":    { "icon": "💪", "description": "The body — physical capacity and health" },
+    "sollertia": { "icon": "🧠", "description": "Skill and cleverness — trained capability" },
+    "anima":     { "icon": "✨", "description": "The animating soul — will and spirit" },
+    "aether":    { "icon": "🔮", "description": "Subtle or magical essence" }
   },
 
   "dimensions": {
     "_comment": "Abstract axes a card may contribute to — spatial, physical, or metaphysical",
-    "mind":   "Intellectual or cognitive contribution",
-    "body":   "Physical or somatic contribution",
-    "skill":  "Trained or practiced contribution",
-    "soul":   "Spiritual or willful contribution",
-    "height": "Spatial elevation — affects lighting, reach, and terrain layering"
+    "mind":   { "icon": "💡", "description": "Intellectual or cognitive contribution" },
+    "body":   { "icon": "🏃", "description": "Physical or somatic contribution" },
+    "skill":  { "icon": "🎯", "description": "Trained or practiced contribution" },
+    "soul":   { "icon": "🕊", "description": "Spiritual or willful contribution" },
+    "height": { "icon": "△", "description": "Spatial elevation — affects lighting, reach, and terrain layering" }
   },
 
   "activities": {
     "_comment": "Action domains and craft categories",
-    "combat":  "Fighting, violence, warfare",
-    "defence": "Protection, fortification, resilience",
-    "craft":   "Making, building, fabrication",
-    "explore": "Discovery, movement, scouting",
-    "quality": "Refinement, excellence, purity"
+    "combat":  { "icon": "⚔", "description": "Fighting, violence, warfare" },
+    "defence": { "icon": "🛡", "description": "Protection, fortification, resilience" },
+    "craft":   { "icon": "🔨", "description": "Making, building, fabrication" },
+    "explore": { "icon": "🧭", "description": "Discovery, movement, scouting" },
+    "quality": { "icon": "💎", "description": "Refinement, excellence, purity" }
   },
 
   "states": {
     "_comment": "Transient or persistent card states",
-    "fleeting": "Temporary — expires after a duration",
-    "memory":   "Retained knowledge or experience"
+    "fleeting": { "icon": "⌛", "description": "Temporary — expires after a duration" },
+    "memory":   { "icon": "📜", "description": "Retained knowledge or experience" }
   }
 
 }

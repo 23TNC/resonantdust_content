@@ -1,20 +1,12 @@
-[
-  {
-    "card_type": "requisite",
-    "category": "default",
-    "cards": {
+{
+  "requisite": {
+    "default": {
       "axe": {
-        "name": "Axe",
-        "style": ["#8B5E3C", "#ecd6aa", "#0b1426"],
-        "aspects": {},
-        "traits": {}
+        "style": ["#8B5E3C", "#ecd6aa", "#0b1426"]
       },
       "pickaxe": {
-        "name": "Pickaxe",
-        "style": ["#8A857C", "#ecd6aa", "#0b1426"],
-        "aspects": {},
-        "traits": {}
+        "style": ["#8A857C", "#ecd6aa", "#0b1426"]
       }
     }
   }
-]
+}
