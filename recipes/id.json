@@ -2,16 +2,10 @@
   "magnetic": {
     "up": {
       "despair_success": 1,
-      "despair_failure": 2,
-      "strike_success": 3,
-      "strike_failure": 4
+      "strike_success": 2
     }
   },
   "on_create": {
-    "magnetic": {
-      "despair": 1,
-      "strike": 2
-    },
     "self": {
       "corpus-": 1,
       "fleeting": 2
@@ -26,8 +20,10 @@
       "triple_corpus": 1,
       "dread_remover": 2,
       "corpus_up": 3,
-      "cut_tree": 4,
-      "break_rock": 5
+      "despair_failure": 4,
+      "strike_failure": 5,
+      "cut_tree": 6,
+      "break_rock": 7
     }
   }
 }

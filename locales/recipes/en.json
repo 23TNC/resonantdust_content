@@ -21,6 +21,12 @@
       },
       "triple_corpus": {
         "label": "triple_corpus"
+      },
+      "despair_failure": {
+        "label": "despair_failure"
+      },
+      "strike_failure": {
+        "label": "strike_failure"
       }
     },
     "down": {

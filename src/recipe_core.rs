@@ -14,8 +14,7 @@
 //!     "down": { ... }
 //!   },
 //!   "on_create": {
-//!     "self":     { ... },
-//!     "magnetic": { ... }
+//!     "self":     { ... }
 //!   },
 //!   "magnetic": {
 //!     "up":   { ... },
@@ -26,7 +25,7 @@
 //!
 //! Top-level keys are recipe types (`stack`, `on_create`, `magnetic`).
 //! Second-level keys are categories (`up`/`down` for stack & magnetic;
-//! `self`/`magnetic` for on_create). Third-level keys ARE the recipe
+//! `self` for on_create). Third-level keys ARE the recipe
 //! identity — no `"id"` field inside the recipe object. Missing buckets
 //! (empty / omitted second-level keys) are valid; treat as `{}`.
 //!
@@ -45,7 +44,7 @@
 //!   a sentinel).
 //! - `{"aspect":   "<name>", "min": N}` — match any card whose aspect
 //!   value is ≥ N.
-//! - `{"category": "<name>"}` — match by card category.
+//!   (`{"category": ...}` retired with the card-category dimension.)
 //! - `{"flag":     "<name>"}` — match cards carrying this flag bit.
 //! - `{"any":      true}` — explicit wildcard.
 //! - `{"and":      [entity, ...]}` — conjunction.
@@ -74,18 +73,10 @@
 //!   on `Card.flags`. Supported values: `"none"` (0), `"ltr"` (1),
 //!   `"rtl"` (2). Future styles slot into 3..=7. Omitting the field
 //!   reads as `"none"`.
-//! - **`output`** / **`output_failure`**: `{ "<place>": { "<owner>":
+//! - **`output`**: `{ "<place>": { "<owner>":
 //!   [<card_key>, ...] } }`. Place is `inventory` or `location`. Owner
 //!   is `root`, `actor`, `hex`, or `action`. Spawn lists are flat
 //!   card-key arrays (not predicates — they're constructors).
-//!   `output_failure` only applies to magnetic outers (loop cap hit
-//!   without dispatching to an inner).
-//! - **`magnetic`** (on `on_create.magnetic` recipes): `{ "success":
-//!   "magnetic.<dir>.<key>", "failure": "magnetic.<dir>.<key>" }`.
-//!   Dotted paths reference inner recipes filed under
-//!   `magnetic.up.*` / `magnetic.down.*`; the leading
-//!   `magnetic.<dir>.` is necessary because recipe keys can collide
-//!   across direction buckets.
 //! - **`hex`** / **`root`**: single entity (or OR-list-sugar array).
 //! - **`slots`**: array of slots, each slot is an entity.
 //! - **`has`** / **`has_below`**: `{ "root"?: [entity, ...], "actor"?:
@@ -112,7 +103,6 @@ use crate::packed::{pack_recipe, RECIPE_ID_MASK, RECIPE_TYPE_OR_CATEGORY_MASK};
 /// Leaf weights:
 /// - `Card`:     4
 /// - `Aspect`:   3
-/// - `Category`: 3
 /// - `Type`:     2
 /// - `Flag`:     2
 /// - `Any`:      1
@@ -128,8 +118,6 @@ pub enum Entity {
   Aspect(AspectId, i32),
   /// Match any card whose `card_type` equals this id.
   Type(u8),
-  /// Match any card whose `card_category` equals this id.
-  Category(u8),
   /// Match any card carrying the named flag (bit position).
   Flag(u8),
   /// Match any card. Lowest specificity.
@@ -160,21 +148,19 @@ pub enum Entity {
 pub enum RecipeType {
   /// `stack.up` / `stack.down` — fired by `propose_action` when a
   /// player submits a chain that the matcher fits a recipe slot
-  /// window against.
+  /// window against. Failure outcomes for magnetic anchors are
+  /// authored as regular stack recipes targeting the magnetic card
+  /// as root.
   Stack(StackDirection),
   /// `on_create.self` — fired when a card is inserted; the new card
   /// is both root and actor of the resulting action.
   OnCreate,
-  /// `on_create.magnetic` — fired on insert, installs a magnetic
-  /// ticker on the new card. The outer recipe carries `magnetic:
-  /// { success, failure }` referencing inner recipes filed under
-  /// `magnetic.{up,down}.<key>` which the ticker dispatches between.
-  OnCreateMagnetic,
-  /// `magnetic.up` / `magnetic.down` — inner recipes a magnetic
-  /// ticker dispatches to. Lookup-only (never matched against a
-  /// chain directly); referenced by dotted path from an
-  /// `OnCreateMagnetic` outer's `magnetic.success` / `magnetic.failure`
-  /// fields.
+  /// `magnetic.up` / `magnetic.down` — success path for a
+  /// lifecycle-pending card. Looked up by stable id (stored on the
+  /// card's def as `lifecycle_recipe_key`) and matched by
+  /// [`match_magnetic_recipe`]. Never appears via the regular
+  /// stack-recipe candidate walk. Phase 6 of the lifecycle rewrite
+  /// folds this into `Stack(_)`.
   Magnetic(StackDirection),
 }
 
@@ -182,16 +168,6 @@ pub enum RecipeType {
 pub enum StackDirection {
   Up,
   Down,
-}
-
-/// Resolved stable ids of the two inner recipes a magnetic outer
-/// dispatches between. Parsed from the outer's `magnetic.success` /
-/// `magnetic.failure` dotted-path strings; resolved to ids in a second
-/// pass after every recipe has been registered.
-#[derive(Debug, Clone, Copy)]
-pub struct MagneticRefs {
-  pub success: u16,
-  pub failure: u16,
 }
 
 // ---------- Product destinations ----------
@@ -316,16 +292,7 @@ pub struct RecipeDef {
   /// Cards produced on success. JSON key: `output`. Empty when the
   /// recipe has no spawn step.
   pub output: Vec<ProductGroup>,
-  /// Cards produced when a magnetic outer's loop cap is reached
-  /// without dispatching. JSON key: `output_failure`. Empty for
-  /// non-magnetic recipes (parser rejects).
-  pub output_failure: Vec<ProductGroup>,
   pub duration: Option<Duration>,
-  /// Set only on `OnCreateMagnetic` recipes. Resolved in the second
-  /// build pass after every recipe id is known.
-  pub magnetic: Option<MagneticRefs>,
-  pub interval: Option<u32>,
-  pub delay: Option<u32>,
   pub set_start: SetStartFlags,
   /// `progress_style` field value (0..=7); see `cards/flags.json`.
   pub style: u8,
@@ -384,6 +351,20 @@ pub struct StackMatch {
   pub has_hex: bool,
 }
 
+/// Try to match a regular `Stack(direction)` recipe against a stack.
+/// Returns the packed recipe index of the best match, or `0` if no
+/// recipe matches.
+///
+/// **Caller responsibility — `FLAG_MAGNETIC_HOLD` exclusion.** This
+/// matcher operates on `packed_definition` values; it has no knowledge
+/// of runtime card flags. Callers must **not** include cards carrying
+/// `FLAG_MAGNETIC_HOLD` in `slot_defs` or pass one as `root_def` —
+/// magnetic-flagged cards belong to magnetic recipes (see
+/// [`match_magnetic_recipe`]) and would otherwise be erroneously
+/// considered for regular stack matching. The exclusion lives in
+/// callers because they're the ones with access to the actual `Card`
+/// row's `flags`. See `actions::propose_action` (server) and the
+/// client-side recipe scan path for the canonical filters.
 pub fn match_stack_recipe(
   hex_def: u16,
   root_def: u16,
@@ -551,6 +532,117 @@ pub fn match_stack_recipe_detail(
   Ok(best.map(|(_, m)| m))
 }
 
+/// Try to match a magnetic recipe against a (root, slots) stack. The
+/// caller is responsible for having determined that the root card
+/// carries `FLAG_MAGNETIC_HOLD` and that the recipe direction matches
+/// the player's intent (up vs down).
+///
+/// Unlike [`match_stack_recipe_detail`], this is a **direct lookup**
+/// — the matcher doesn't search all magnetic recipes for the best
+/// fit. Instead it reads the root's `lifecycle_recipe_key`, resolves
+/// to the specific recipe, validates predicates against the supplied
+/// stack, and either returns a [`StackMatch`] or `Ok(None)` if the
+/// recipe's predicates aren't satisfied.
+///
+/// Returns:
+/// - `Ok(Some(StackMatch))` when the magnetic recipe matches.
+/// - `Ok(None)` when the root has no `lifecycle_recipe_key` (not a
+///   lifecycle-pending card), when the slot predicates don't match,
+///   or when the recipe's declared direction doesn't match the
+///   caller's `direction`.
+/// - `Err` when the def or recipe registry fails to build, or when
+///   the recipe key on the def points at a non-magnetic or
+///   nonexistent recipe (an authoring error caught by
+///   [`crate::definition_core::validate_lifecycle_recipes`] at test
+///   time, but defended here too).
+pub fn match_magnetic_recipe(
+  root_def: u16,
+  slot_defs: &[u16],
+  direction: StackDirection,
+  has_candidates: Option<&HasCandidates>,
+) -> Result<Option<StackMatch>, String> {
+  let Some(root_card) = decode_definition(root_def)? else {
+    return Ok(None);
+  };
+  let Some(packed_recipe_id) =
+    crate::definition_core::lifecycle_recipe_for_def(root_card)?
+  else {
+    return Ok(None);
+  };
+  let Some(recipe) = recipe(packed_recipe_id)? else {
+    return Err(format!(
+      "card {:?}: magnetic_recipe resolved to packed id {} which isn't registered",
+      root_card.key, packed_recipe_id
+    ));
+  };
+
+  // Confirm direction matches. A magnetic_up card paired with a
+  // downward stack-build attempt is a no-match (returns `Ok(None)`),
+  // not an error — the client could be trying both directions.
+  match recipe.recipe_type {
+    RecipeType::Magnetic(d) if d == direction => {}
+    RecipeType::Magnetic(_) => return Ok(None),
+    other => {
+      return Err(format!(
+        "card {:?}: magnetic_recipe resolves to non-magnetic type {:?}",
+        root_card.key, other
+      ));
+    }
+  }
+
+  // Validate predicates exactly like match_stack_recipe_detail does,
+  // but against this one recipe rather than searching. Magnetic
+  // recipes don't declare a `hex` entity today — they pull from
+  // inventory, not from a hex tile. If a future content extension
+  // adds hex predicates to magnetic recipes, this branch needs to
+  // grow accordingly; for now we treat any declared hex as a
+  // no-match here (recipes/data validation should reject hex on
+  // magnetic recipes upstream).
+  if recipe.hex.is_some() {
+    return Ok(None);
+  }
+
+  if let Some(e) = &recipe.root {
+    if entity_specificity(e, root_card) == 0 {
+      return Ok(None);
+    }
+  }
+
+  if let Some(hc) = has_candidates {
+    if !has_predicates_feasible(recipe, hc) {
+      return Ok(None);
+    }
+  }
+
+  // Slot predicates: magnetic recipes pull cards in declared order
+  // (slot[0], slot[1], ...). The caller is expected to pass the same
+  // ordering in `slot_defs`. Specificity ranking isn't useful here
+  // (no search across alternatives) but we still compute it so the
+  // returned `StackMatch` carries comparable shape to the regular
+  // matcher's output.
+  if slot_defs.len() != recipe.slots.len() {
+    return Ok(None);
+  }
+  // No specificity accumulation needed — there's no ranking across
+  // alternatives, just a single recipe to validate against.
+  for (slot_entity, &slot_def) in recipe.slots.iter().zip(slot_defs.iter()) {
+    let Some(def) = decode_definition(slot_def)? else {
+      return Ok(None);
+    };
+    if entity_specificity(slot_entity, def) == 0 {
+      return Ok(None);
+    }
+  }
+
+  Ok(Some(StackMatch {
+    recipe_index: recipe.index,
+    slot_start: 0,
+    slot_count: recipe.slots.len() as u32,
+    has_root: recipe.root.is_some(),
+    has_hex: false,
+  }))
+}
+
 /// Score how well a single entity matches a card definition; 0 means
 /// no match. See [`Entity`] for weight conventions.
 pub fn entity_specificity(entity: &Entity, def: &CardDefinition) -> u32 {
@@ -568,9 +660,6 @@ pub fn entity_specificity(entity: &Entity, def: &CardDefinition) -> u32 {
     }
     Entity::Type(type_id) => {
       if def.card_type == *type_id { 2 } else { 0 }
-    }
-    Entity::Category(cat_id) => {
-      if def.card_category == *cat_id { 3 } else { 0 }
     }
     Entity::Flag(bit) => {
       if def.flags & (1u32 << bit) != 0 { 2 } else { 0 }
@@ -669,7 +758,6 @@ fn recipe_type_names(rt: RecipeType) -> (&'static str, &'static str) {
     RecipeType::Stack(StackDirection::Up) => ("stack", "up"),
     RecipeType::Stack(StackDirection::Down) => ("stack", "down"),
     RecipeType::OnCreate => ("on_create", "self"),
-    RecipeType::OnCreateMagnetic => ("on_create", "magnetic"),
     RecipeType::Magnetic(StackDirection::Up) => ("magnetic", "up"),
     RecipeType::Magnetic(StackDirection::Down) => ("magnetic", "down"),
   }
@@ -684,7 +772,6 @@ fn parse_recipe_type(type_name: &str, category_name: &str) -> Option<RecipeType>
     ("stack", "up") => Some(RecipeType::Stack(StackDirection::Up)),
     ("stack", "down") => Some(RecipeType::Stack(StackDirection::Down)),
     ("on_create", "self") => Some(RecipeType::OnCreate),
-    ("on_create", "magnetic") => Some(RecipeType::OnCreateMagnetic),
     ("magnetic", "up") => Some(RecipeType::Magnetic(StackDirection::Up)),
     ("magnetic", "down") => Some(RecipeType::Magnetic(StackDirection::Down)),
     _ => None,
@@ -753,9 +840,6 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
   let mut by_id: BTreeMap<u16, RecipeDef> = BTreeMap::new();
   let mut id_by_name: BTreeMap<String, u16> = BTreeMap::new();
   let mut by_type: BTreeMap<(u8, u8), Vec<u16>> = BTreeMap::new();
-  // (outer_packed_id, success_path, failure_path, filename) — resolved
-  // in second pass below.
-  let mut pending_magnetic: Vec<(u16, String, String, &'static str)> = Vec::new();
 
   for (filename, content) in RECIPES_FILES {
     let parsed: Value = serde_json::from_str(content)
@@ -797,68 +881,17 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
               filename, key
             ));
           }
-          let (def, pending) =
+          let def =
             parse_recipe(key, recipe_value, recipe_type, stable_id, filename, &type_ids)?;
           by_type.entry(pair).or_default().push(stable_id);
           id_by_name.insert(key.clone(), stable_id);
           by_id.insert(stable_id, def);
-          if let Some((s, f)) = pending {
-            pending_magnetic.push((stable_id, s, f, filename));
-          }
         }
       }
     }
   }
 
-  // Second pass: resolve magnetic outer refs.
-  for (outer_id, succ_path, fail_path, filename) in pending_magnetic {
-    let success = resolve_magnetic_path(&succ_path, "success", outer_id, filename, &id_by_name, &by_id)?;
-    let failure = resolve_magnetic_path(&fail_path, "failure", outer_id, filename, &id_by_name, &by_id)?;
-    if let Some(def) = by_id.get_mut(&outer_id) {
-      def.magnetic = Some(MagneticRefs { success, failure });
-    }
-  }
-
   Ok(RecipeRegistry { by_id, id_by_name, by_type })
-}
-
-fn resolve_magnetic_path(
-  path: &str,
-  field: &str,
-  outer_id: u16,
-  filename: &str,
-  id_by_name: &BTreeMap<String, u16>,
-  by_id: &BTreeMap<u16, RecipeDef>,
-) -> Result<u16, String> {
-  let parts: Vec<&str> = path.split('.').collect();
-  if parts.len() != 3 {
-    return Err(format!(
-      "{}: magnetic outer (stable_id={}) magnetic.{} {:?} not a 'type.category.id' path",
-      filename, outer_id, field, path
-    ));
-  }
-  let (path_type, path_category, leaf) = (parts[0], parts[1], parts[2]);
-  let resolved = *id_by_name.get(leaf).ok_or_else(|| {
-    format!(
-      "{}: magnetic outer (stable_id={}) magnetic.{} {:?}: leaf id {:?} not found",
-      filename, outer_id, field, path, leaf
-    )
-  })?;
-  let def = by_id.get(&resolved).expect("id_by_name and by_id share keys");
-  if !matches!(def.recipe_type, RecipeType::Magnetic(_)) {
-    return Err(format!(
-      "{}: magnetic outer (stable_id={}) magnetic.{} {:?} resolved to non-magnetic recipe (got {:?})",
-      filename, outer_id, field, path, def.recipe_type
-    ));
-  }
-  let (actual_type, actual_category) = recipe_type_names(def.recipe_type);
-  if path_type != actual_type || path_category != actual_category {
-    return Err(format!(
-      "{}: magnetic outer (stable_id={}) magnetic.{} {:?} prefix mismatch — leaf {:?} is filed under {:?}.{:?}",
-      filename, outer_id, field, path, leaf, actual_type, actual_category
-    ));
-  }
-  Ok(resolved)
 }
 
 // ---------- Per-recipe parsing ----------
@@ -870,7 +903,7 @@ fn parse_recipe(
   stable_id: u16,
   filename: &str,
   type_ids: &BTreeMap<String, u8>,
-) -> Result<(RecipeDef, Option<(String, String)>), String> {
+) -> Result<RecipeDef, String> {
   let obj = recipe_value.as_object().ok_or_else(|| {
     format!("{}: recipe {:?}: value not an object", filename, key)
   })?;
@@ -905,88 +938,24 @@ fn parse_recipe(
   let has_below = parse_has_ops(obj.get("has_below"), type_ids, filename, key, "has_below")?;
 
   let output = parse_output_groups(obj.get("output"), type_ids, filename, key, "output")?;
-  let output_failure =
-    parse_output_groups(obj.get("output_failure"), type_ids, filename, key, "output_failure")?;
-  if !output_failure.is_empty() && recipe_type != RecipeType::OnCreateMagnetic {
-    return Err(format!(
-      "{}: recipe {:?}: 'output_failure' only valid on on_create.magnetic outers",
-      filename, key
-    ));
-  }
 
   let duration = obj
     .get("duration")
     .map(|v| parse_duration(v, type_ids, filename, key))
     .transpose()?;
-  if duration.is_none() && recipe_type != RecipeType::OnCreateMagnetic {
+  if duration.is_none() {
     return Err(format!(
-      "{}: recipe {:?}: missing required 'duration' (only magnetic outers may omit it)",
+      "{}: recipe {:?}: missing required 'duration'",
       filename, key
     ));
   }
 
-  if matches!(recipe_type, RecipeType::OnCreate | RecipeType::OnCreateMagnetic)
+  if matches!(recipe_type, RecipeType::OnCreate)
     && root.is_none()
     && hex.is_none()
   {
     return Err(format!(
       "{}: recipe {:?}: on_create recipes must specify 'root' or 'hex'",
-      filename, key
-    ));
-  }
-
-  let interval = parse_u32_field(obj.get("interval"), filename, key, "interval")?;
-  let delay = parse_u32_field(obj.get("delay"), filename, key, "delay")?;
-  if recipe_type != RecipeType::OnCreateMagnetic {
-    if interval.is_some() {
-      return Err(format!(
-        "{}: recipe {:?}: 'interval' only valid on on_create.magnetic outers",
-        filename, key
-      ));
-    }
-    if delay.is_some() {
-      return Err(format!(
-        "{}: recipe {:?}: 'delay' only valid on on_create.magnetic outers",
-        filename, key
-      ));
-    }
-  }
-
-  let pending_magnetic = match obj.get("magnetic") {
-    None => None,
-    Some(v) => {
-      if recipe_type != RecipeType::OnCreateMagnetic {
-        return Err(format!(
-          "{}: recipe {:?}: 'magnetic' refs only valid on on_create.magnetic outers",
-          filename, key
-        ));
-      }
-      let m = v.as_object().ok_or_else(|| {
-        format!(
-          "{}: recipe {:?}: 'magnetic' must be an object with 'success' and 'failure' keys",
-          filename, key
-        )
-      })?;
-      let succ = m
-        .get("success")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-          format!("{}: recipe {:?}: 'magnetic.success' missing or not a string", filename, key)
-        })?
-        .to_string();
-      let fail = m
-        .get("failure")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-          format!("{}: recipe {:?}: 'magnetic.failure' missing or not a string", filename, key)
-        })?
-        .to_string();
-      Some((succ, fail))
-    }
-  };
-  if recipe_type == RecipeType::OnCreateMagnetic && pending_magnetic.is_none() {
-    return Err(format!(
-      "{}: recipe {:?}: on_create.magnetic outer must define 'magnetic.success' and 'magnetic.failure'",
       filename, key
     ));
   }
@@ -1005,30 +974,11 @@ fn parse_recipe(
     has,
     has_below,
     output,
-    output_failure,
     duration,
-    magnetic: None,
-    interval,
-    delay,
     set_start,
     style,
   };
-  Ok((def, pending_magnetic))
-}
-
-fn parse_u32_field(
-  value: Option<&Value>,
-  filename: &str,
-  recipe_id: &str,
-  field: &str,
-) -> Result<Option<u32>, String> {
-  let Some(v) = value else { return Ok(None) };
-  let n = v.as_u64().ok_or_else(|| {
-    format!("{}: recipe {:?}: {:?} not a non-negative integer: {:?}", filename, recipe_id, field, v)
-  })?;
-  u32::try_from(n).map(Some).map_err(|_| {
-    format!("{}: recipe {:?}: {} {} exceeds u32 range", filename, recipe_id, field, n)
-  })
+  Ok(def)
 }
 
 // ---------- Style ----------
@@ -1442,17 +1392,11 @@ fn parse_entity(
       .unwrap_or(1) as i32;
     return Ok(Entity::Aspect(id, min));
   }
-  if let Some(cat_val) = obj.get("category") {
-    let name = cat_val.as_str().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'category' must be a string", filename, recipe_id, path)
-    })?;
-    let &id = crate::definition_core::card_category_ids()?.get(name).ok_or_else(|| {
-      format!(
-        "{}: recipe {:?} {}: unknown category {:?} (not in cards/types.json)",
-        filename, recipe_id, path, name
-      )
-    })?;
-    return Ok(Entity::Category(id));
+  if obj.contains_key("category") {
+    return Err(format!(
+      "{}: recipe {:?} {}: 'category' predicate retired — card_category dimension was removed. See docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md.",
+      filename, recipe_id, path
+    ));
   }
   if let Some(flag_val) = obj.get("flag") {
     let name = flag_val.as_str().ok_or_else(|| {
@@ -1584,4 +1528,36 @@ fn parse_duration(
     )
   })?;
   Ok(Duration::Conditional { cases, fallback })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::definition_core::find_packed_by_key;
+
+  /// `match_magnetic_recipe` returns `Ok(None)` for a card that has
+  /// no `lifecycle_recipe_key` on its def. Sanity check against real
+  /// content — picks any non-magnetic card we know exists.
+  #[test]
+  fn magnetic_returns_none_for_non_magnetic_root() {
+    // `axe` is a regular card in the current content registry.
+    let axe = find_packed_by_key("axe").expect("registry").expect("axe def");
+    let result =
+      match_magnetic_recipe(axe, &[], StackDirection::Up, None).expect("matcher");
+    assert!(result.is_none(), "non-magnetic card should not match magnetic recipe");
+  }
+
+  /// Regular stack matcher accepts an empty `slot_defs` slice without
+  /// panicking or erroring. Failure recipes (Phase 7) will rely on
+  /// zero-slot matching to fire against a transformed magnetic card
+  /// when no slot inputs are required.
+  #[test]
+  fn stack_matcher_accepts_empty_slots() {
+    let axe = find_packed_by_key("axe").expect("registry").expect("axe def");
+    // No recipe currently matches `(hex=0, root=axe, slots=[])`, so
+    // we expect Ok(0) — "no match" rather than an error.
+    let result =
+      match_stack_recipe(0, axe, &[], StackDirection::Up).expect("matcher");
+    assert_eq!(result, 0, "empty slot_defs should yield no-match, not error");
+  }
 }

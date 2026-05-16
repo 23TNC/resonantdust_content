@@ -1,18 +1,34 @@
 {
   "revery": {
-    "default": {
-      "dread": {
-        "style": ["#3a3a4a", "#ecd6aa", "#0b1426"]
-      }
+    "dread": {
+      "style": [
+        "#3a3a4a",
+        "#ecd6aa",
+        "#0b1426"
+      ]
     }
   },
   "event": {
-    "default": {
-      "despair": {
-        "style": ["#3a3a4a", "#2a2a3a", "#0b1426"]
-      },
-      "strike": {
-        "style": ["#3a3a4a", "#2a2a3a", "#0b1426"]
+    "despair": {
+      "style": [
+        "#3a3a4a",
+        "#2a2a3a",
+        "#0b1426"
+      ],
+      "magnetic": {
+        "recipe": "despair_success",
+        "duration_ms": 60000
+      }
+    },
+    "strike": {
+      "style": [
+        "#3a3a4a",
+        "#2a2a3a",
+        "#0b1426"
+      ],
+      "magnetic": {
+        "recipe": "strike_success",
+        "duration_ms": 60000
       }
     }
   }

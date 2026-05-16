@@ -5,18 +5,16 @@
 //! `<lang>` is a short language code (`en`, future `fr`, etc.). The
 //! file's JSON shape mirrors the corresponding `id.json` structure
 //! exactly — `locales/cards/en.json` is path-keyed by
-//! `<card_type>/<category>/<key>`, `locales/recipes/en.json` by
+//! `<card_type>/<key>`, `locales/recipes/en.json` by
 //! `<recipe_type>/<category>/<key>`, etc.
 //!
 //! ```jsonc
 //! // locales/cards/en.json
 //! {
 //!   "requisite": {
-//!     "default": {
-//!       "log": {
-//!         "label": "Log",
-//!         "description": { "simple": "Just a wooden log." }
-//!       }
+//!     "log": {
+//!       "label": "Log",
+//!       "description": { "simple": "Just a wooden log." }
 //!     }
 //!   }
 //! }

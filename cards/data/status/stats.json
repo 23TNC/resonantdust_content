@@ -1,21 +1,88 @@
 {
   "faculty": {
-    "default": {
-      "corpus":     { "style": ["#E67E7E", "#ecd6aa", "#0b1426"] },
-      "corpus-":    { "style": ["#3a3a4a", "#2a2a3a", "#0b1426"] },
-      "corpus+":    { "style": ["#E67E7E", "#ecd6aa", "#0b1426"] },
-
-      "aether":     { "style": ["#7D96E3", "#ecd6aa", "#0b1426"] },
-      "aether-":    { "style": ["#3a3a4a", "#2a2a3a", "#0b1426"] },
-      "aether+":    { "style": ["#7D96E3", "#ecd6aa", "#0b1426"] },
-
-      "sollertia":  { "style": ["#97e3a7", "#ecd6aa", "#0b1426"] },
-      "sollertia-": { "style": ["#3a3a4a", "#2a2a3a", "#0b1426"] },
-      "sollertia+": { "style": ["#97e3a7", "#ecd6aa", "#0b1426"] },
-
-      "anima":      { "style": ["#FFD966", "#ecd6aa", "#0b1426"] },
-      "anima-":     { "style": ["#3a3a4a", "#2a2a3a", "#0b1426"] },
-      "anima+":     { "style": ["#FFD966", "#ecd6aa", "#0b1426"] }
+    "corpus": {
+      "style": [
+        "#E67E7E",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "corpus-": {
+      "style": [
+        "#3a3a4a",
+        "#2a2a3a",
+        "#0b1426"
+      ]
+    },
+    "corpus+": {
+      "style": [
+        "#E67E7E",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "aether": {
+      "style": [
+        "#7D96E3",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "aether-": {
+      "style": [
+        "#3a3a4a",
+        "#2a2a3a",
+        "#0b1426"
+      ]
+    },
+    "aether+": {
+      "style": [
+        "#7D96E3",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "sollertia": {
+      "style": [
+        "#97e3a7",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "sollertia-": {
+      "style": [
+        "#3a3a4a",
+        "#2a2a3a",
+        "#0b1426"
+      ]
+    },
+    "sollertia+": {
+      "style": [
+        "#97e3a7",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "anima": {
+      "style": [
+        "#FFD966",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "anima-": {
+      "style": [
+        "#3a3a4a",
+        "#2a2a3a",
+        "#0b1426"
+      ]
+    },
+    "anima+": {
+      "style": [
+        "#FFD966",
+        "#ecd6aa",
+        "#0b1426"
+      ]
     }
   }
 }

@@ -19,6 +19,20 @@
         "output": { "inventory": { "root": ["corpus-"] } },
         "duration": 10,
         "style": "rtl"
+      },
+      "despair_failure": {
+        "root": "despair",
+        "reagents": { "roles": ["root"] },
+        "output": { "inventory": { "root": ["dread"] } },
+        "duration": 10,
+        "style": "ltr"
+      },
+      "strike_failure": {
+        "root": "strike",
+        "reagents": { "roles": ["root"] },
+        "output": { "inventory": { "root": ["dread"] } },
+        "duration": 10,
+        "style": "ltr"
       }
     },
     "down": {
@@ -61,82 +75,24 @@
         ],
         "style": "rtl"
       }
-    },
-    "magnetic": {
-      "despair": {
-        "hex": "despair",
-        "set": {
-          "start": {
-            "hex": { "drop_locked": true, "surface_locked": true }
-          }
-        },
-        "magnetic": {
-          "success": "magnetic.up.despair_success",
-          "failure": "magnetic.up.despair_failure"
-        },
-        "duration": 60,
-        "delay": 10,
-        "interval": 2,
-        "style": "ltr"
-      },
-      "strike": {
-        "hex": "strike",
-        "set": {
-          "start": {
-            "hex": { "drop_locked": true, "surface_locked": true }
-          }
-        },
-        "magnetic": {
-          "success": "magnetic.up.strike_success",
-          "failure": "magnetic.up.strike_failure"
-        },
-        "duration": 60,
-        "delay": 10,
-        "interval": 2,
-        "style": "ltr"
-      }
     }
   },
 
   "magnetic": {
     "up": {
       "despair_success": {
-        "hex": "despair",
-        "root": "dread",
-        "reagents": { "roles": ["hex", "root"] },
-        "set": {
-          "start": {
-            "root": { "drop_hold": true }
-          }
-        },
-        "output": { "inventory": { "hex": ["corpus"] } },
-        "duration": 10,
-        "style": "ltr"
-      },
-      "despair_failure": {
-        "hex": "despair",
-        "reagents": { "roles": ["hex"] },
-        "output": { "inventory": { "hex": ["dread"] } },
+        "root": "despair",
+        "slots": ["dread"],
+        "reagents": { "slots": [0], "roles": ["root"] },
+        "output": { "inventory": { "root": ["corpus"] } },
         "duration": 10,
         "style": "ltr"
       },
       "strike_success": {
-        "hex": "strike",
+        "root": "strike",
         "slots": ["corpus", "corpus", "corpus"],
-        "reagents": { "slots": [0, 1, 2], "roles": ["hex"] },
-        "set": {
-          "start": {
-            "root": { "drop_hold": true }
-          }
-        },
+        "reagents": { "slots": [0, 1, 2], "roles": ["root"] },
         "output": { "inventory": { "root": ["corpus-", "corpus-", "corpus-"] } },
-        "duration": 10,
-        "style": "ltr"
-      },
-      "strike_failure": {
-        "hex": "strike",
-        "reagents": { "roles": ["hex"] },
-        "output": { "inventory": { "hex": ["dread"] } },
         "duration": 10,
         "style": "ltr"
       }

@@ -1,13 +1,51 @@
 {
   "tile": {
-    "default": {
-      "forest_1": {
-        "style": ["#799E50", "#0b1426", "#0b1426"],
-        "traits": { "cost": 10 }
+    "forest_1": {
+      "style": [
+        "#799E50",
+        "#0b1426",
+        "#0b1426"
+      ],
+      "traits": {
+        "cost": 10
+      }
+    },
+    "forest_2": {
+      "style": [
+        "#395C39",
+        "#7fb377",
+        "#0b1426"
+      ],
+      "traits": {
+        "cost": 12
+      }
+    },
+    "tree": {
+      "style": [
+        "#395C39",
+        "#3D2818",
+        "#0b1426"
+      ],
+      "aspects": {
+        "wood": 1,
+        "flora": 1
       },
-      "forest_2": {
-        "style": ["#395C39", "#7fb377", "#0b1426"],
-        "traits": { "cost": 12 }
+      "traits": {
+        "cost": 30
+      }
+    },
+    "rock": {
+      "style": [
+        "#395C39",
+        "#2A2A2A",
+        "#0b1426"
+      ],
+      "aspects": {
+        "stone": 1,
+        "flora": 1
+      },
+      "traits": {
+        "cost": 30
       }
     }
   }

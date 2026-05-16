@@ -22,7 +22,5 @@
     "event":          { "id": 10, "visibility": "public",  "shape": "hex",  "_comment": "Event tiles." }
   },
 
-  "categories": {
-    "default": { "id": 0 }
-  }
+  "_categories_tombstone": "The card-side `categories` axis was retired (see docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md). Lower nibble of packed_definition's former category slot folded into def_id (u8 → u12). Block kept as tombstone; do not re-add unless you intend to widen packed_definition again."
 }

@@ -1,50 +1,38 @@
 {
   "event": {
-    "default": {
-      "despair": 1,
-      "strike": 2
-    }
+    "despair": 1,
+    "strike": 2
   },
   "faculty": {
-    "default": {
-      "corpus": 1,
-      "corpus-": 2,
-      "corpus+": 3,
-      "aether": 4,
-      "aether-": 5,
-      "aether+": 6,
-      "sollertia": 7,
-      "sollertia-": 8,
-      "sollertia+": 9,
-      "anima": 10,
-      "anima-": 11,
-      "anima+": 12
-    }
+    "corpus": 1,
+    "corpus-": 2,
+    "corpus+": 3,
+    "aether": 4,
+    "aether-": 5,
+    "aether+": 6,
+    "sollertia": 7,
+    "sollertia-": 8,
+    "sollertia+": 9,
+    "anima": 10,
+    "anima-": 11,
+    "anima+": 12
   },
   "requisite": {
-    "default": {
-      "axe": 1,
-      "pickaxe": 2,
-      "log": 3,
-      "stone": 4
-    }
+    "axe": 1,
+    "pickaxe": 2,
+    "log": 3,
+    "stone": 4
   },
   "revery": {
-    "default": {
-      "dread": 1
-    }
+    "dread": 1
   },
   "soul": {
-    "default": {
-      "human": 1
-    }
+    "human": 1
   },
   "tile": {
-    "default": {
-      "forest_1": 1,
-      "forest_2": 2,
-      "tree": 3,
-      "rock": 4
-    }
+    "forest_1": 1,
+    "forest_2": 2,
+    "tree": 3,
+    "rock": 4
   }
 }

@@ -1,0 +1,7 @@
+{
+  "tile": {
+    "wood": 1,
+    "stone": 2,
+    "flora": 3
+  }
+}

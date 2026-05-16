@@ -1,6 +1,24 @@
 /* @ts-self-types="./resonantdust_content.d.ts" */
 
 /**
+ * Every registered texture definition, in stable-id order. Each entry
+ * carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
+ * `size`, and `scale: { min, max }`. Returns an empty array when no
+ * textures are registered. Throws on registry-build failure.
+ *
+ * Called once at startup by `TextureRegistry.ts` to build the client-side
+ * lookup map; not intended for per-frame use.
+ * @returns {any}
+ */
+export function allTextures() {
+    const ret = wasm.allTextures();
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Look up an aspect by id. Returns the `Aspect` object (with `id`,
  * `name`, `description`, `icon`, `group` fields) or `null` for
  * `ASPECT_NONE` (id 0) and unknown ids. Throws on registry-build
@@ -104,10 +122,10 @@ export function cardTypeId(name) {
 }
 
 /**
- * Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
- * into a `CardDefinition`-shaped JS object. Returns `null` if no card
- * matches the packed value. Throws a string error if the card registry
- * failed to build (malformed JSON, unknown aspects, etc.).
+ * Decode a packed `(cardType:u4 | definitionId:u12)` value into a
+ * `CardDefinition`-shaped JS object. Returns `null` if no card
+ * matches the packed value. Throws a string error if the card
+ * registry failed to build (malformed JSON, unknown aspects, etc.).
  * @param {number} packed
  * @returns {any}
  */
@@ -137,6 +155,29 @@ export function findPackedByKey(key) {
 }
 
 /**
+ * Look up a recipe by its tree-key (third-level key under
+ * `<type>/<category>/<key>` in `recipes/data/*.json`). Returns a
+ * `RecipeBrief`-shaped JS object on hit, `null` on miss. Throws on
+ * registry-build failure.
+ *
+ * Used by [`MagneticResolutionManager`](../../../../pixijs/src/game/magnetic/MagneticResolutionManager.ts)
+ * to resolve a card def's `magneticRecipeKey` into the packed
+ * recipe id needed for `proposeAction`, plus enough metadata
+ * (slot count, direction) to drive client-side slot scanning.
+ * @param {string} key
+ * @returns {any}
+ */
+export function findRecipeByKey(key) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.findRecipeByKey(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Whether the given `cardType` id resolves to a hex-shaped type
  * (`"hex"` in `cards/types.json`). Throws on registry-build failure.
  * @param {number} type_id
@@ -148,6 +189,43 @@ export function isHexType(type_id) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] !== 0;
+}
+
+/**
+ * Try to match a magnetic recipe against `(root_def, slot_defs)`.
+ * Mirrors the server-side `match_magnetic_recipe` (Phase 2 of the
+ * magnetic rewrite). Returns a `StackMatch`-shaped JS object on
+ * success or `null` if the predicates don't fit. Throws on
+ * registry-build failure or invalid direction.
+ *
+ * `direction` is `0 = up`, `1 = down`. The client looks up the
+ * magnetic card's `magneticRecipeKey` to know the direction (the
+ * recipe's `recipe_type` encodes it).
+ * @param {number} root_def
+ * @param {Uint16Array} slot_defs
+ * @param {number} direction
+ * @param {Uint16Array} root_above
+ * @param {Uint16Array} actor_above
+ * @param {Uint16Array} root_below
+ * @param {Uint16Array} actor_below
+ * @returns {any}
+ */
+export function matchMagneticRecipe(root_def, slot_defs, direction, root_above, actor_above, root_below, actor_below) {
+    const ptr0 = passArray16ToWasm0(slot_defs, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray16ToWasm0(root_above, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray16ToWasm0(actor_above, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray16ToWasm0(root_below, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray16ToWasm0(actor_below, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.matchMagneticRecipe(root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -226,6 +304,36 @@ export function starterPacksForSoul(soul) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Read the numeric value of a named trait off a packed card
+ * definition. Returns `null` when:
+ * - the trait name isn't in `traits.json`,
+ * - the def doesn't carry that trait,
+ * - or the packed def doesn't resolve to a registered card.
+ *
+ * Source-of-truth pair with the server's
+ * `def.trait_value(trait_id("name"))` path — both go through the
+ * same `CardDefinition::trait_value` lookup, so client and server
+ * agree on cost / speed numbers by construction.
+ *
+ * Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
+ * resolve per-tile `cost` and per-soul `speed` for the step-time
+ * calculation, mirroring the server validator in
+ * `movement::move_soul_path`.
+ * @param {number} packed_def
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function traitValue(packed_def, name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.traitValue(packed_def, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
 }
 function __wbg_get_imports() {
     const import0 = {

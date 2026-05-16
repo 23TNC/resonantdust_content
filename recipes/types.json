@@ -11,7 +11,7 @@
     "up":              { "id": 0, "valid_for": ["stack", "magnetic"], "_comment": "Top branch — for stack recipes, slots extend upward from the root; for magnetic inner recipes, pulled cards stack upward on the anchor." },
     "down":            { "id": 1, "valid_for": ["stack", "magnetic"], "_comment": "Bottom branch — for stack recipes, slots extend downward from the root; for magnetic inner recipes, pulled cards stack downward on the anchor." },
     "self":            { "id": 2, "valid_for": ["on_create"],         "_comment": "The newly created card is both root and actor." },
-    "magnetic":        { "id": 3, "valid_for": ["on_create"],          "_comment": "On-create recipe that installs a magnetic-phase ticker on the new card. The recipe's magnetic_success / magnetic_failure fields name the inner recipes the ticker dispatches to." },
+    "_reserved_3":     { "id": 3, "valid_for": [],                    "_comment": "Formerly 'magnetic' under on_create — installed a server-side magnetic-phase ticker. Replaced by definition-flag inheritance in cards::create_at + client-driven MagneticResolutionManager. Tombstoned per the stable-id policy." },
     "_reserved_4":     { "id": 4, "valid_for": [],                    "_comment": "Formerly 'success' — when magnetic inner recipes were filed under magnetic/{success,failure}. Success vs. failure is now derived from which slot of the outer recipe points at the inner; inners are filed under magnetic/{up,down} by stacking direction. Tombstoned per the stable-id policy." },
     "_reserved_5":     { "id": 5, "valid_for": [],                    "_comment": "Formerly 'failure' — see _reserved_4." }
   }

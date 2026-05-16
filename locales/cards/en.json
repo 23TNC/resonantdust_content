@@ -1,104 +1,164 @@
 {
   "requisite": {
-    "default": {
-      "log": {
-        "label": "Log",
-        "description": {
-          "simple": "Just a wooden log."
-        }
-      },
-      "stone": {
-        "label": "Stone",
-        "description": {
-          "simple": "A common stone."
-        }
-      },
-      "axe": {
-        "label": "Axe"
-      },
-      "pickaxe": {
-        "label": "Pickaxe"
+    "log": {
+      "label": "Log",
+      "description": {
+        "simple": "A length of cut wood — fuel and lumber both."
       }
-    }
+    },
+    "stone": {
+      "label": "Stone",
+      "description": {
+        "simple": "Rough quarried stone — heavy and slow to shape, but lasting."
+      }
+    },
+    "axe": {
+      "label": "Axe",
+      "description": {
+        "simple": "A simple hand axe — useful for chopping wood."
+      }
+    },
+    "pickaxe": {
+      "label": "Pickaxe",
+      "description": {
+        "simple": "A heavy pickaxe — useful for breaking stone."
+      }
+    },
+    "label": "stone"
   },
   "event": {
-    "default": {
-      "despair": {
-        "label": "Despair"
-      },
-      "strike": {
-        "label": "Strike"
+    "despair": {
+      "label": "Despair",
+      "description": {
+        "simple": "A bleak omen anchored to the world. Feed it dread to lift it; ignore it and it lingers."
       }
-    }
+    },
+    "strike": {
+      "label": "Strike",
+      "description": {
+        "simple": "A burst of effort pinned to the world. Channel corpus into it to see it through."
+      }
+    },
+    "label": "strike"
   },
   "faculty": {
-    "default": {
-      "aether": {
-        "label": "Aether"
-      },
-      "aether+": {
-        "label": "Aether+"
-      },
-      "aether-": {
-        "label": "Aether-"
-      },
-      "anima": {
-        "label": "Anima"
-      },
-      "anima+": {
-        "label": "Anima+"
-      },
-      "anima-": {
-        "label": "Anima-"
-      },
-      "corpus": {
-        "label": "Corpus"
-      },
-      "corpus+": {
-        "label": "Corpus+"
-      },
-      "corpus-": {
-        "label": "Corpus-"
-      },
-      "sollertia": {
-        "label": "Sollertia"
-      },
-      "sollertia+": {
-        "label": "Sollertia+"
-      },
-      "sollertia-": {
-        "label": "Sollertia-"
+    "aether": {
+      "label": "Aether",
+      "description": {
+        "simple": "The subtle essence — the spark of magic in a soul."
       }
-    }
+    },
+    "aether+": {
+      "label": "Aether+",
+      "description": {
+        "simple": "Aether kindled brighter than rest. A surplus."
+      }
+    },
+    "aether-": {
+      "label": "Aether-",
+      "description": {
+        "simple": "Aether spent. Will recover in time."
+      }
+    },
+    "anima": {
+      "label": "Anima",
+      "description": {
+        "simple": "The animating spirit — will and intent."
+      }
+    },
+    "anima+": {
+      "label": "Anima+",
+      "description": {
+        "simple": "Spirit stoked beyond its usual flame."
+      }
+    },
+    "anima-": {
+      "label": "Anima-",
+      "description": {
+        "simple": "Spirit spent. Will recover in time."
+      }
+    },
+    "corpus": {
+      "label": "Corpus",
+      "description": {
+        "simple": "The body's vigor — physical capacity and health."
+      }
+    },
+    "corpus+": {
+      "label": "Corpus+",
+      "description": {
+        "simple": "Vigor heightened beyond rest. A surplus of strength."
+      }
+    },
+    "corpus-": {
+      "label": "Corpus-",
+      "description": {
+        "simple": "Body spent. Will recover in time."
+      }
+    },
+    "sollertia": {
+      "label": "Sollertia",
+      "description": {
+        "simple": "Trained skill and cleverness — the cunning hand and quick wit."
+      }
+    },
+    "sollertia+": {
+      "label": "Sollertia+",
+      "description": {
+        "simple": "Skill sharpened past its usual edge."
+      }
+    },
+    "sollertia-": {
+      "label": "Sollertia-",
+      "description": {
+        "simple": "Skill spent. Will recover in time."
+      }
+    },
+    "label": "sollertia-"
   },
   "revery": {
-    "default": {
-      "dread": {
-        "label": "Dread"
+    "dread": {
+      "label": "Dread",
+      "description": {
+        "simple": "A clinging fear that resists being put down."
       }
-    }
+    },
+    "label": "dread"
   },
   "soul": {
-    "default": {
-      "human": {
-        "label": "Human"
+    "human": {
+      "label": "Human",
+      "description": {
+        "simple": "An ordinary mortal — adaptable, balanced across every faculty."
       }
-    }
+    },
+    "label": "human"
   },
   "tile": {
-    "default": {
-      "forest_1": {
-        "label": "Forest 1"
-      },
-      "forest_2": {
-        "label": "Forest 2"
-      },
-      "rock": {
-        "label": "Rock"
-      },
-      "tree": {
-        "label": "Tree"
+    "forest_1": {
+      "label": "Forest 1",
+      "description": {
+        "simple": "Light forest — passable, but slower than open ground."
       }
-    }
+    },
+    "forest_2": {
+      "label": "Forest 2",
+      "description": {
+        "simple": "Dense forest — costly to cross."
+      }
+    },
+    "rock": {
+      "label": "Rock",
+      "description": {
+        "simple": "A boulder of useful stone. Break it apart with a pickaxe."
+      }
+    },
+    "tree": {
+      "label": "Tree",
+      "description": {
+        "simple": "A standing tree. Cut it down with an axe for logs."
+      }
+    },
+    "label": "tree"
   }
 }

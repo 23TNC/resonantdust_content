@@ -4,6 +4,7 @@
   "resources": {
     "_comment": "Raw and processed materials",
     "labor":  { "icon": "⚒", "description": "Work or effort applied to a task" },
+    "flora":  { "icon": "🌿", "description": "Living plant matter — trees, bushes, undergrowth" },
     "wood":   { "icon": "🪵", "description": "Timber — logs, branches, raw lumber" },
     "stone":  { "icon": "🪨", "description": "Rock, ore, mineral material" },
     "metal":  { "icon": "🔩", "description": "Processed or smelted metallic material" },

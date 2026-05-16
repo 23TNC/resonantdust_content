@@ -3,6 +3,21 @@
 Recipe data — loaded by both the SpacetimeDB server and the pixijs
 client. Parsing lives in [`../src/recipe_core.rs`](../src/recipe_core.rs).
 
+> **Doc is partially stale.** The magnetic rewrite (see
+> [`docs/MAGNETIC_REWRITE.md`](../../docs/MAGNETIC_REWRITE.md))
+> retired the `on_create.magnetic` outer / inner / ticker /
+> loop-budget mechanism. `RecipeType::OnCreateMagnetic`,
+> `output_failure`, `magnetic` (refs), `interval`, and `delay` recipe
+> fields are gone. The remaining `magnetic.up.*` / `magnetic.down.*`
+> recipes are simple stack recipes that the client submits when its
+> [`LifecycleResolutionManager`](../../pixijs/src/game/lifecycle/LifecycleResolutionManager.ts)
+> fires. The lifecycle rewrite (in progress, see
+> [`docs/LIFECYCLE_REWRITE.md`](../../docs/LIFECYCLE_REWRITE.md))
+> will fold the `magnetic.*` bucket back into `stack.*` entirely.
+> Sections below describing magnetic outers, `output_failure`, the
+> `magnetic.success/failure` refs, etc., are kept here as
+> historical context for now — they no longer parse.
+
 ## Layout
 
 ```

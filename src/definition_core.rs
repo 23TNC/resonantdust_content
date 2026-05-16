@@ -1,6 +1,6 @@
 //! Card and aspect definition registries.
 //!
-//! Decodes a `packed_definition` (`[card_type:u4][card_category:u4][definition_id:u8]`)
+//! Decodes a `packed_definition` (`[card_type:u4][definition_id:u12]`)
 //! into a `CardDefinition` carrying display name, color style, and aspect
 //! list. Used by the action machinery, which evaluates recipes against the
 //! aspects of the cards in a stack.
@@ -9,12 +9,12 @@
 //!
 //! Source data lives in `<repo>/content/`:
 //!
-//! - `cards/types.json` — registry of `card_type` and `card_category` ids.
+//! - `cards/types.json` — registry of `card_type` ids.
 //! - `aspects.json` — grouped aspect catalog. Aspects are 1-indexed in
 //!   JSON insertion order across all groups (id 0 reserved as `ASPECT_NONE`).
-//! - `cards/data/*.json` — per-file arrays of buckets, each bucket pinning a
-//!   `card_type` + `category` and listing its cards as
-//!   `{ key: { "name": str, "style": [c0, c1, c2],
+//! - `cards/data/<card_type>/*.json` — per-file objects, each top-level
+//!   key being a `card_type`, and that value an object of cards as
+//!   `{ key: { "style": [c0, c1, c2],
 //!             "aspects": { aspect_name: value, ... },
 //!             "traits":  { trait_name:  value, ... } } }`.
 //!
@@ -54,6 +54,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+use crate::flags_core::card_flag_bit;
 use crate::packed::pack_definition;
 
 // ---------- Aspects ----------
@@ -302,8 +303,11 @@ fn build_traits() -> Result<TraitRegistry, String> {
 #[serde(rename_all = "camelCase")]
 pub struct CardDefinition {
   pub card_type: u8,
-  pub card_category: u8,
-  pub definition_id: u8,
+  /// 1-based id within the type's bucket. Widened to u16 (from u8)
+  /// when the `card_category` dimension was retired — `packed_definition`'s
+  /// 4-bit category slot collapsed into `def_id`, giving 4095 distinct
+  /// def_ids per type. See docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md.
+  pub definition_id: u16,
   /// Programmatic key from the JSON, e.g. `"axe"`. Stable identifier
   /// used as the path-form last segment (`requisite/default/axe`) and
   /// as the lookup key in `content/locales/cards/<lang>.json` for
@@ -311,9 +315,11 @@ pub struct CardDefinition {
   /// stored on the definition — clients resolve them via the locales
   /// registry; the bare key is the dev-side fallback.
   pub key: String,
-  /// Three CSS hex color codes for rendering. Validated as `#RRGGBB` at
-  /// registry build time.
-  pub style: [String; 3],
+  /// Style array: indices 0-2 are `#RRGGBB` color codes (primary,
+  /// secondary, outline), validated at build time. Optional indices 3-4
+  /// are sprite filenames (`""` = no sprite): index 3 = background
+  /// sprite, index 4 = foreground sprite.
+  pub style: Vec<String>,
   /// `(aspect_id, value)` pairs. Names are translated to ids at registry
   /// build time via `aspect_id`; an unknown aspect name in card data is a
   /// stored registry-build error. Each `aspect_id` appears at most once
@@ -338,6 +344,22 @@ pub struct CardDefinition {
   /// initialisation here when a definition needs to spawn cards with
   /// non-zero flags again.
   pub flags: u32,
+  /// Lifecycle-resolution recipe id, by stable string key. `Some`
+  /// only for cards with a queued transformation (magnetic-style
+  /// anchors AND decay-style cards like `corpus-`). Stored as a
+  /// string here — and not the packed `u16` — to avoid a
+  /// build-order cycle between the cards and recipes registries
+  /// (recipes resolve card paths during their build; if cards
+  /// resolved recipe ids during their build, we'd deadlock).
+  /// Resolve to a packed id at use time via
+  /// [`lifecycle_recipe_for_def`]. See
+  /// [docs/LIFECYCLE_REWRITE.md](../../../docs/LIFECYCLE_REWRITE.md).
+  pub lifecycle_recipe_key: Option<String>,
+  /// Phase duration in milliseconds. `Some` only for lifecycle-
+  /// pending cards. A card's lifecycle phase ends at
+  /// `install_row.valid_at_time + lifecycle_duration_ms`; computed
+  /// (never stamped as a future row).
+  pub lifecycle_duration_ms: Option<u32>,
 }
 
 impl CardDefinition {
@@ -357,28 +379,28 @@ impl CardDefinition {
 const CARD_TYPES_JSON: &str = include_str!("../cards/types.json");
 const CARD_IDS_JSON: &str = include_str!("../cards/id.json");
 
-/// Maximum valid id for a `card_type` or `card_category`. Both occupy the
-/// `u4` halves of `packed_definition`, so 0xF is the hard cap.
-const MAX_TYPE_OR_CATEGORY_ID: u64 = 0xF;
+/// Maximum valid id for a `card_type`. Occupies the top u4 of
+/// `packed_definition`, so 0xF is the hard cap.
+const MAX_TYPE_ID: u64 = 0xF;
+/// Maximum valid `definition_id` — fits in the low u12 of
+/// `packed_definition` after the category retire.
+const MAX_DEFINITION_ID: u64 = 0x0FFF;
 
 use crate::embedded_data::CARDS_FILES;
 
 struct CardRegistry {
   by_packed: BTreeMap<u16, CardDefinition>,
-  /// `(type_id, category_id, key)` → `packed_definition`.
-  by_path: BTreeMap<(u8, u8, String), u16>,
+  /// `(type_id, key)` → `packed_definition`.
+  by_path: BTreeMap<(u8, String), u16>,
   /// Bare key → `packed_definition`, from `cards/id.json`.
   by_key: BTreeMap<String, u16>,
   type_ids: BTreeMap<String, u8>,
-  category_ids: BTreeMap<String, u8>,
   /// `type_id` → shape (`"rect"` or `"hex"`) from `cards/types.json`.
   /// Drives [`is_hex_type`]; missing types default to `"rect"`.
   type_shapes: BTreeMap<u8, String>,
   /// Reverse of `type_ids`: `type_id` → name. Used to construct locale
-  /// paths like `"requisite.default.axe"` from a packed definition.
+  /// paths like `"requisite.axe"` from a packed definition.
   type_names: BTreeMap<u8, String>,
-  /// Reverse of `category_ids`: `category_id` → name.
-  category_names: BTreeMap<u8, String>,
 }
 
 static CARDS: OnceLock<Result<CardRegistry, String>> = OnceLock::new();
@@ -388,9 +410,8 @@ fn cards_registry() -> Result<&'static CardRegistry, String> {
 }
 
 /// Look up the `CardDefinition` for a `packed_definition`. `Ok(None)` for
-/// the sentinel value 0, unknown `(card_type, card_category)`, or a
-/// `definition_id` past the end of its bucket. `Err` on registry-build
-/// failure.
+/// the sentinel value 0, unknown `card_type`, or a `definition_id` past
+/// the end of its bucket. `Err` on registry-build failure.
 pub fn decode_definition(packed: u16) -> Result<Option<&'static CardDefinition>, String> {
   Ok(cards_registry()?.by_packed.get(&packed))
 }
@@ -423,16 +444,8 @@ pub fn card_type_ids() -> Result<&'static BTreeMap<String, u8>, String> {
   Ok(&cards_registry()?.type_ids)
 }
 
-/// All known `card_category` ids keyed by name. Recipe parsing resolves
-/// `{"category": "<name>"}` entity objects through this map. Triggers a
-/// build of the card registry on first access (same `Result` discipline
-/// as [`card_type_ids`]).
-pub fn card_category_ids() -> Result<&'static BTreeMap<String, u8>, String> {
-  Ok(&cards_registry()?.category_ids)
-}
-
 /// Build the dotted locale-lookup path for a packed definition, e.g.
-/// `"requisite.default.axe"`. Returns `Ok(None)` for unknown packed ids.
+/// `"requisite.axe"`. Returns `Ok(None)` for unknown packed ids.
 /// The path format mirrors `locales/cards/<lang>.json`'s nesting and is
 /// consumed by `locales_core::label("cards", lang, path)`.
 pub fn card_locale_path(packed_def: u16) -> Result<Option<String>, String> {
@@ -445,26 +458,25 @@ pub fn card_locale_path(packed_def: u16) -> Result<Option<String>, String> {
     .get(&def.card_type)
     .map(String::as_str)
     .unwrap_or("unknown");
-  let category_name = registry
-    .category_names
-    .get(&def.card_category)
-    .map(String::as_str)
-    .unwrap_or("unknown");
-  Ok(Some(format!("{}.{}.{}", type_name, category_name, def.key)))
+  Ok(Some(format!("{}.{}", type_name, def.key)))
 }
 
-/// Resolve a `"type/key"` or `"type/category/key"` string to the card's
-/// `packed_definition`. Two-segment paths default the category to
-/// `"default"`. Returns a descriptive `Err` for malformed paths,
-/// unrecognized type / category / key, or registry-build failure.
+/// Resolve a `"type/key"` string to the card's `packed_definition`.
+/// Returns a descriptive `Err` for malformed paths, unrecognized
+/// type or key, or registry-build failure.
+///
+/// `"type/category/key"` (legacy three-segment) is still accepted with
+/// the middle segment ignored, easing the transition from the
+/// category-retired data files; remove this tolerance once any
+/// remaining authored content has flattened.
 pub fn find_packed(card_path: &str) -> Result<u16, String> {
   let parts: Vec<&str> = card_path.split('/').collect();
-  let (type_name, category_name, card_key) = match parts.len() {
-    2 => (parts[0], "default", parts[1]),
-    3 => (parts[0], parts[1], parts[2]),
+  let (type_name, card_key) = match parts.len() {
+    2 => (parts[0], parts[1]),
+    3 => (parts[0], parts[2]), // legacy: type/category/key — middle ignored
     _ => {
       return Err(format!(
-        "invalid card path {:?}, expected 'type/key' or 'type/category/key'",
+        "invalid card path {:?}, expected 'type/key'",
         card_path
       ));
     }
@@ -475,15 +487,83 @@ pub fn find_packed(card_path: &str) -> Result<u16, String> {
     .type_ids
     .get(type_name)
     .ok_or_else(|| format!("unknown card type {:?}", type_name))?;
-  let &category_id = registry
-    .category_ids
-    .get(category_name)
-    .ok_or_else(|| format!("unknown card category {:?}", category_name))?;
   registry
     .by_path
-    .get(&(type_id, category_id, card_key.to_string()))
+    .get(&(type_id, card_key.to_string()))
     .copied()
     .ok_or_else(|| format!("unknown card {:?}", card_path))
+}
+
+// ---------- Lifecycle-recipe resolution ----------
+//
+// Card defs store `lifecycle_recipe_key` as a string (the third-level
+// recipe key from the JSON tree) rather than the packed `u16` id, to
+// avoid a build-order cycle with the recipes registry. The helpers
+// below do the lookup at use time. They live here rather than in
+// `recipe_core` so the API hangs off the card-definition surface
+// callers naturally hold.
+
+/// Look up the packed `u16` id of the lifecycle recipe declared on
+/// this definition. Returns:
+///
+/// - `Ok(None)` — the def has no `lifecycle_recipe_key` (it's not a
+///   lifecycle-pending card).
+/// - `Ok(Some(packed_id))` — found and the recipe is one of the
+///   magnetic types (today; lifecycle rewrite phase 6 folds these
+///   into `Stack(_)`).
+/// - `Err` — the def declares a recipe key that doesn't exist in the
+///   recipes registry, or the recipe exists but isn't a magnetic
+///   type, or the recipes registry failed to build.
+///
+/// Forces the recipes registry to build on first call. Callers in hot
+/// paths may want to cache the result.
+pub fn lifecycle_recipe_for_def(def: &CardDefinition) -> Result<Option<u16>, String> {
+  let Some(recipe_key) = def.lifecycle_recipe_key.as_deref() else {
+    return Ok(None);
+  };
+  let recipe = crate::recipe_core::find_recipe(recipe_key)?.ok_or_else(|| {
+    format!(
+      "card {:?}: lifecycle.recipe {:?} not declared in any recipe file",
+      def.key, recipe_key
+    )
+  })?;
+  let rt = recipe.recipe_type;
+  if !matches!(rt, crate::recipe_core::RecipeType::Magnetic(_)) {
+    return Err(format!(
+      "card {:?}: lifecycle.recipe {:?} resolves to a non-magnetic recipe (type {:?})",
+      def.key, recipe_key, rt
+    ));
+  }
+  Ok(Some(recipe.index))
+}
+
+/// Walk every registered card definition and validate that any
+/// declared `lifecycle_recipe_key` resolves to a real lifecycle recipe.
+/// Returns `Ok(())` if every lifecycle card checks out, or a
+/// descriptive error on the first failure.
+///
+/// Designed for build-time / startup validation — `bin/content check`
+/// runs this so authoring errors surface before deployment rather
+/// than at first lifecycle-card spawn. Idempotent and free to call
+/// from tests.
+pub fn validate_lifecycle_recipes() -> Result<(), String> {
+  let registry = cards_registry()?;
+  for def in registry.by_packed.values() {
+    if def.lifecycle_recipe_key.is_none() && def.lifecycle_duration_ms.is_none() {
+      continue;
+    }
+    // A half-specified lifecycle block is parser-rejected, but
+    // belt-and-suspenders the check here too.
+    if def.lifecycle_recipe_key.is_none() || def.lifecycle_duration_ms.is_none() {
+      return Err(format!(
+        "card {:?}: lifecycle block half-specified \
+         (recipe_key={:?}, duration_ms={:?})",
+        def.key, def.lifecycle_recipe_key, def.lifecycle_duration_ms
+      ));
+    }
+    lifecycle_recipe_for_def(def)?;
+  }
+  Ok(())
 }
 
 fn build_cards() -> Result<CardRegistry, String> {
@@ -491,51 +571,42 @@ fn build_cards() -> Result<CardRegistry, String> {
     .map_err(|e| format!("cards/types.json: parse failed: {}", e))?;
 
   let type_ids = json_id_map(&types_root, "types")?;
-  let category_ids = json_id_map(&types_root, "categories")?;
   let type_shapes = json_type_shapes(&types_root)?;
   let type_names: BTreeMap<u8, String> =
     type_ids.iter().map(|(k, &v)| (v, k.clone())).collect();
-  let category_names: BTreeMap<u8, String> =
-    category_ids.iter().map(|(k, &v)| (v, k.clone())).collect();
 
   // Load stable definition_id map — must exist (run gen-ids.py before building).
   // Format: { "<card_type>": { "<key>": <definition_id>, ... }, ... }
+  // (The `category` middle level was retired — see
+  // docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md.)
   let id_root: Value = serde_json::from_str(CARD_IDS_JSON)
     .map_err(|e| format!("cards/id.json: parse failed: {}", e))?;
   let id_obj = id_root
     .as_object()
     .ok_or_else(|| "cards/id.json: top-level not an object".to_string())?;
-  let mut definition_ids: BTreeMap<String, BTreeMap<String, BTreeMap<String, u8>>> = BTreeMap::new();
+  let mut definition_ids: BTreeMap<String, BTreeMap<String, u16>> = BTreeMap::new();
   for (type_name, type_val) in id_obj {
     let type_obj = type_val
       .as_object()
       .ok_or_else(|| format!("cards/id.json: entry for type {:?} not an object", type_name))?;
-    for (category_name, cat_val) in type_obj {
-      let cat_obj = cat_val
-        .as_object()
-        .ok_or_else(|| format!("cards/id.json: entry for {:?}/{:?} not an object", type_name, category_name))?;
-      let mut inner: BTreeMap<String, u8> = BTreeMap::new();
-      for (key, val) in cat_obj {
-        let n = val.as_u64().ok_or_else(|| {
-          format!("cards/id.json: definition_id for {:?}/{:?}/{:?} not an integer", type_name, category_name, key)
-        })?;
-        if n == 0 || n > u8::MAX as u64 {
-          return Err(format!(
-            "cards/id.json: definition_id {} for {:?}/{:?}/{:?} out of range (1–255)",
-            n, type_name, category_name, key
-          ));
-        }
-        inner.insert(key.clone(), n as u8);
+    let mut inner: BTreeMap<String, u16> = BTreeMap::new();
+    for (key, val) in type_obj {
+      let n = val.as_u64().ok_or_else(|| {
+        format!("cards/id.json: definition_id for {:?}/{:?} not an integer", type_name, key)
+      })?;
+      if n == 0 || n > MAX_DEFINITION_ID {
+        return Err(format!(
+          "cards/id.json: definition_id {} for {:?}/{:?} out of range (1..={})",
+          n, type_name, key, MAX_DEFINITION_ID
+        ));
       }
-      definition_ids
-        .entry(type_name.clone())
-        .or_default()
-        .insert(category_name.clone(), inner);
+      inner.insert(key.clone(), n as u16);
     }
+    definition_ids.insert(type_name.clone(), inner);
   }
 
   let mut by_packed: BTreeMap<u16, CardDefinition> = BTreeMap::new();
-  let mut by_path: BTreeMap<(u8, u8, String), u16> = BTreeMap::new();
+  let mut by_path: BTreeMap<(u8, String), u16> = BTreeMap::new();
   let mut by_key: BTreeMap<String, u16> = BTreeMap::new();
 
   for (filename, content) in CARDS_FILES {
@@ -544,60 +615,47 @@ fn build_cards() -> Result<CardRegistry, String> {
     // Nested shape:
     //   {
     //     "<card_type>": {
-    //       "<category>": {
-    //         "<key>": { "style": [...], "aspects"?: {...}, "traits"?: {...} }
-    //       }
+    //       "<key>": { "style": [...], "aspects"?: {...}, "traits"?: {...} }
     //     }
     //   }
     //
     // Multiple types per file → multiple top-level keys.
     // `aspects` / `traits` are optional (default `{}`); `style` is
     // required. Card paths matching `cards/types.json` decode to ids
-    // here; unknown types/categories are silently skipped so card
-    // data can outpace the registry without breaking the build (a
-    // typo just won't produce a decodable card).
+    // here; unknown types are silently skipped so card data can
+    // outpace the registry without breaking the build (a typo just
+    // won't produce a decodable card).
     let root = parsed.as_object().ok_or_else(|| {
       format!("{}: top-level must be an object keyed by card_type", filename)
     })?;
 
-    for (type_name, by_category) in root {
+    for (type_name, by_key_val) in root {
       let Some(&card_type) = type_ids.get(type_name) else { continue };
-      let categories = by_category.as_object().ok_or_else(|| {
+      let cards_obj = by_key_val.as_object().ok_or_else(|| {
         format!("{}: type {:?}: value not an object", filename, type_name)
       })?;
 
-      for (category_name, by_key_val) in categories {
-        let Some(&card_category) = category_ids.get(category_name) else { continue };
-        let cards_obj = by_key_val.as_object().ok_or_else(|| {
-          format!(
-            "{}: {}/{}: category value not an object",
-            filename, type_name, category_name
-          )
-        })?;
-
-        for (key, value) in cards_obj.iter() {
-          let definition_id = definition_ids
-            .get(type_name)
-            .and_then(|m| m.get(category_name))
-            .and_then(|m| m.get(key.as_str()))
-            .copied()
-            .ok_or_else(|| {
-              format!(
-                "{}: card {:?} ({:?}/{:?}) not found in cards/id.json — run gen-ids.py",
-                filename, key, type_name, category_name
-              )
-            })?;
-          let definition = parse_card(filename, value, card_type, card_category, definition_id, key)?;
-          let packed = pack_definition(card_type, card_category, definition_id);
-          by_packed.insert(packed, definition);
-          by_path.insert((card_type, card_category, key.clone()), packed);
-          by_key.insert(key.clone(), packed);
-        }
+      for (key, value) in cards_obj.iter() {
+        let definition_id = definition_ids
+          .get(type_name)
+          .and_then(|m| m.get(key.as_str()))
+          .copied()
+          .ok_or_else(|| {
+            format!(
+              "{}: card {:?} (type {:?}) not found in cards/id.json — run gen-ids.py",
+              filename, key, type_name
+            )
+          })?;
+        let definition = parse_card(filename, value, card_type, definition_id, key)?;
+        let packed = pack_definition(card_type, definition_id);
+        by_packed.insert(packed, definition);
+        by_path.insert((card_type, key.clone()), packed);
+        by_key.insert(key.clone(), packed);
       }
     }
   }
 
-  Ok(CardRegistry { by_packed, by_path, by_key, type_ids, category_ids, type_shapes, type_names, category_names })
+  Ok(CardRegistry { by_packed, by_path, by_key, type_ids, type_shapes, type_names })
 }
 
 /// Build a `type_id → shape` map from `cards/types.json`'s `types`
@@ -618,7 +676,7 @@ fn json_type_shapes(root: &Value) -> Result<BTreeMap<u8, String>, String> {
       .get("id")
       .and_then(Value::as_u64)
       .ok_or_else(|| format!("cards/types.json: types.{:?} missing 'id'", name))?;
-    if id > MAX_TYPE_OR_CATEGORY_ID {
+    if id > MAX_TYPE_ID {
       continue;
     }
     if let Some(shape) = info.get("shape").and_then(Value::as_str) {
@@ -655,10 +713,10 @@ fn json_id_map(root: &Value, section: &str) -> Result<BTreeMap<String, u8>, Stri
         section, name
       )
     })?;
-    if id_u64 > MAX_TYPE_OR_CATEGORY_ID {
+    if id_u64 > MAX_TYPE_ID {
       return Err(format!(
         "cards/types.json: '{}' entry {:?} id {} exceeds u4 max ({})",
-        section, name, id_u64, MAX_TYPE_OR_CATEGORY_ID,
+        section, name, id_u64, MAX_TYPE_ID,
       ));
     }
     result.insert(name.clone(), id_u64 as u8);
@@ -670,8 +728,7 @@ fn parse_card(
   filename: &str,
   value: &Value,
   card_type: u8,
-  card_category: u8,
-  definition_id: u8,
+  definition_id: u16,
   key: &str,
 ) -> Result<CardDefinition, String> {
   let obj = value
@@ -682,17 +739,21 @@ fn parse_card(
     .get("style")
     .and_then(Value::as_array)
     .ok_or_else(|| format!("{}: card {}: missing or non-array 'style'", filename, key))?;
-  if style_arr.len() != 3 {
+  if style_arr.len() != 3 && style_arr.len() != 5 {
     return Err(format!(
-      "{}: card {}: style needs exactly 3 entries",
+      "{}: card {}: style needs 3 entries (colors) or 5 entries (colors + sprites)",
       filename, key
     ));
   }
-  let style: [String; 3] = [
+  let mut style: Vec<String> = vec![
     style_str(filename, key, style_arr, 0)?,
     style_str(filename, key, style_arr, 1)?,
     style_str(filename, key, style_arr, 2)?,
   ];
+  if style_arr.len() == 5 {
+    style.push(sprite_str(filename, key, style_arr, 3)?);
+    style.push(sprite_str(filename, key, style_arr, 4)?);
+  }
 
   // `aspects` and `traits` are optional. Empty / missing both mean
   // "no aspects" / "no traits" — most cards declare neither and the
@@ -713,15 +774,50 @@ fn parse_card(
     }
   };
 
+  // `lifecycle` block (or its `magnetic` alias for backwards compat
+  // during the lifecycle rewrite): optional. When present, declares
+  // this card as a lifecycle-pending card that resolves via a
+  // specific recipe over a fixed duration. Both `recipe` and
+  // `duration_ms` are required if the block appears at all — a
+  // half-specified block is a parse error rather than a silent
+  // default. See [docs/LIFECYCLE_REWRITE.md](../../../docs/LIFECYCLE_REWRITE.md).
+  let lifecycle_block = obj.get("lifecycle").or_else(|| obj.get("magnetic"));
+  let (lifecycle_recipe_key, lifecycle_duration_ms) = match lifecycle_block {
+    None => (None, None),
+    Some(Value::Object(mag_obj)) => parse_lifecycle(filename, key, mag_obj)?,
+    Some(_) => {
+      return Err(format!(
+        "{}: card {}: 'lifecycle' (or 'magnetic') not an object",
+        filename, key
+      ));
+    }
+  };
+
+  // Cards declared as lifecycle-pending auto-inherit the `magnetic`
+  // flag bit (cards/flags.json bit 12 — name kept for stable-id
+  // discipline; phase 6 of the lifecycle rewrite will rename it to
+  // `lifecycle_pending`). The card-write hook in `cards::write_at`
+  // keys off this bit to install the lifecycle_pending row.
+  let mut flags: u32 = 0;
+  if lifecycle_recipe_key.is_some() {
+    let bit = card_flag_bit("magnetic")?.ok_or_else(|| {
+      "cards/flags.json missing single-bit flag 'magnetic' — required by \
+       lifecycle def-flag inheritance"
+        .to_string()
+    })?;
+    flags |= 1u32 << bit;
+  }
+
   Ok(CardDefinition {
     card_type,
-    card_category,
     definition_id,
     key: key.to_string(),
     style,
     aspects,
     traits,
-    flags: 0,
+    flags,
+    lifecycle_recipe_key,
+    lifecycle_duration_ms,
   })
 }
 
@@ -754,6 +850,76 @@ fn parse_aspects(
     aspects.push((id, aspect_value));
   }
   Ok(aspects)
+}
+
+/// Parse the optional `lifecycle` block on a card. Also called for
+/// the deprecated `magnetic` block (same shape; the caller resolves
+/// which key to use).
+///
+/// Shape:
+/// ```json
+/// "lifecycle": {
+///   "recipe": "<recipe_key>",
+///   "duration_ms": 60000
+/// }
+/// ```
+///
+/// Returns `(Some(recipe_key), Some(duration_ms))`. Validates duration
+/// is a positive integer; recipe-key string is taken verbatim and
+/// resolved to a packed recipe id by [`lifecycle_recipe_for_def`] at use
+/// time — see the field comment on `CardDefinition.lifecycle_recipe_key`
+/// for why resolution is deferred.
+fn parse_lifecycle(
+  filename: &str,
+  key: &str,
+  mag_obj: &serde_json::Map<String, Value>,
+) -> Result<(Option<String>, Option<u32>), String> {
+  let recipe_key = mag_obj
+    .get("recipe")
+    .ok_or_else(|| {
+      format!(
+        "{}: card {}: 'lifecycle' missing required 'recipe' field",
+        filename, key
+      )
+    })?
+    .as_str()
+    .ok_or_else(|| {
+      format!(
+        "{}: card {}: 'lifecycle.recipe' not a string",
+        filename, key
+      )
+    })?
+    .to_string();
+
+  let duration_n = mag_obj
+    .get("duration_ms")
+    .ok_or_else(|| {
+      format!(
+        "{}: card {}: 'lifecycle' missing required 'duration_ms' field",
+        filename, key
+      )
+    })?
+    .as_u64()
+    .ok_or_else(|| {
+      format!(
+        "{}: card {}: 'lifecycle.duration_ms' not a non-negative integer",
+        filename, key
+      )
+    })?;
+  if duration_n == 0 {
+    return Err(format!(
+      "{}: card {}: 'lifecycle.duration_ms' must be > 0",
+      filename, key
+    ));
+  }
+  if duration_n > u32::MAX as u64 {
+    return Err(format!(
+      "{}: card {}: 'lifecycle.duration_ms' {} exceeds u32 max",
+      filename, key, duration_n,
+    ));
+  }
+
+  Ok((Some(recipe_key), Some(duration_n as u32)))
 }
 
 fn parse_traits(
@@ -804,6 +970,13 @@ fn style_str(filename: &str, key: &str, arr: &[Value], idx: usize) -> Result<Str
   Ok(s.to_string())
 }
 
+fn sprite_str(filename: &str, key: &str, arr: &[Value], idx: usize) -> Result<String, String> {
+  let s = arr[idx]
+    .as_str()
+    .ok_or_else(|| format!("{}: card {}: style[{}] not a string", filename, key, idx))?;
+  Ok(s.to_string())
+}
+
 /// `#RRGGBB` validator. Lowercase or uppercase hex, exactly 6 hex digits.
 fn is_valid_hex_color(s: &str) -> bool {
   let bytes = s.as_bytes();
@@ -828,5 +1001,15 @@ mod tests {
     assert!(!is_valid_hex_color("#GGGGGG"));
     assert!(!is_valid_hex_color(""));
     assert!(!is_valid_hex_color("#"));
+  }
+
+  /// Authoring check: every card def declaring a `magnetic` block
+  /// must point at a recipe of one of the magnetic types. Run via
+  /// `bin/content test`. A failure here is a content-authoring bug
+  /// — fix the card def's `lifecycle.recipe` field or add the missing
+  /// recipe under `recipes/data/magnetic/*.json`.
+  #[test]
+  fn lifecycle_recipes_resolve() {
+    validate_lifecycle_recipes().expect("lifecycle recipe validation");
   }
 }

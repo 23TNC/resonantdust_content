@@ -7,11 +7,11 @@ client. Loaded by [`src/definition_core.rs`](../src/definition_core.rs).
 
 ```
 cards/
-  types.json       # card_type / card_category registry (with shape + visibility)
+  types.json       # card_type registry (with shape + visibility)
   aspects.json     # aspect catalog (i32-valued, 1-indexed across groups)
   traits.json      # trait catalog  (f32-valued, 1-indexed across groups)
   flags.json       # bit-position registry for cards.flags u32
-  id.json          # stable definition_id per (type, category, key) — generated
+  id.json          # stable definition_id per (type, key) — generated
   data/            # card definition tree, auto-discovered by build.rs
     requisites/    # equipment.json, resources.json
     souls/         # human.json
@@ -27,27 +27,26 @@ are NOT in this tree** — they live under
 
 ## File format (cards/data/**/*.json)
 
-Each file is a nested object: `card_type → category → card_key → spec`.
+Each file is a nested object: `card_type → card_key → spec`. (The
+former `category` middle level was retired — see
+[docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md](../../docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md).)
 
 ```json
 {
   "soul": {
-    "default": {
-      "human": {
-        "style": ["#a8e0e6", "#ecd6aa", "#0b1426"],
-        "aspects": { "mind": 2, "body": 2, "soul": 2, "skill": 1, "order": 1 },
-        "traits":  { "speed": 12 }
-      }
+    "human": {
+      "style": ["#a8e0e6", "#ecd6aa", "#0b1426"],
+      "aspects": { "mind": 2, "body": 2, "soul": 2, "skill": 1, "order": 1 },
+      "traits":  { "speed": 12 }
     }
   }
 }
 ```
 
-One file can carry multiple types or categories — every top-level key
-must be a known `card_type` in [`types.json`](types.json) and every
-second-level key a known `card_category`. **Unknown `(type, category)`
-pairs are silently skipped** at registry build, so content files can
-outpace the registry; a typo just won't produce a decodable card.
+One file can carry multiple types — every top-level key must be a
+known `card_type` in [`types.json`](types.json). **Unknown types are
+silently skipped** at registry build, so content files can outpace
+the registry; a typo just won't produce a decodable card.
 
 ### Card spec fields
 
@@ -186,9 +185,9 @@ The recipe parser resolves `{"flag": "<name>"}` entity predicates and
 `set.start.<role>.<flag>` operations through this file — a typo'd
 flag name is a hard build error.
 
-The file also has dormant `actions` / `magnetic_actions` sections that
-mirror the `cards` shape; they're not surfaced through the registry
-yet, but the file is the agreed home when they go live.
+The file also has `actions` / `magnetic_actions` sections kept as
+historical context (those tables were retired in the magnetic rewrite
+and don't exist server-side anymore).
 
 ## Stable definition IDs (cards/id.json)
 
@@ -218,14 +217,12 @@ yet, but the file is the agreed home when they go live.
   doesn't matter); `--skip-known` preserves existing ids and only
   appends new entries (the discipline you want once ids are baked
   into save data).
-- The server combines `definition_id` with the bucket's
-  `(card_type, card_category)` at build time to produce the
-  wire-format `u16` `packed_definition`:
+- The server combines `definition_id` with the bucket's `card_type`
+  at build time to produce the wire-format `u16` `packed_definition`:
 
   ```
   bits 15..12 : card_type      (u4, from types.json)
-  bits 11..8  : card_category  (u4, from types.json)
-  bits  7..0  : definition_id  (u8, from cards/id.json)
+  bits 11..0  : definition_id  (u12, from cards/id.json)
   ```
 
 - [`find_packed_by_key(key) → Option<u16>`](../src/definition_core.rs)

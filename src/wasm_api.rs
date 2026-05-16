@@ -7,8 +7,8 @@
 //!
 //! Field names on serialized structs are renamed to camelCase via
 //! `#[serde(rename_all = "camelCase")]` on the source structs, so JS-side
-//! consumers see `cardType` / `cardCategory` / `definitionId` rather than
-//! the Rust snake_case names.
+//! consumers see `cardType` / `definitionId` rather than the Rust
+//! snake_case names.
 
 use wasm_bindgen::prelude::*;
 
@@ -24,12 +24,15 @@ use crate::flags_core::{
   card_flag_bit as core_card_flag_bit, card_flag_field as core_card_flag_field,
 };
 use crate::recipe_core::{
+  find_recipe as core_find_recipe,
+  match_magnetic_recipe as core_match_magnetic_recipe,
   match_stack_recipe_detail as core_match_stack_recipe_detail,
   HasCandidates, StackDirection,
 };
 use crate::starter_pack_core::{
   starter_packs_for_soul as core_starter_packs_for_soul,
 };
+use crate::texture_core::textures as core_textures;
 
 /// Look up an aspect by id. Returns the `Aspect` object (with `id`,
 /// `name`, `description`, `icon`, `group` fields) or `null` for
@@ -45,10 +48,10 @@ pub fn aspect_info(id: u8) -> Result<JsValue, JsValue> {
   }
 }
 
-/// Decode a packed `(cardType:u4 | cardCategory:u4 | definitionId:u8)` value
-/// into a `CardDefinition`-shaped JS object. Returns `null` if no card
-/// matches the packed value. Throws a string error if the card registry
-/// failed to build (malformed JSON, unknown aspects, etc.).
+/// Decode a packed `(cardType:u4 | definitionId:u12)` value into a
+/// `CardDefinition`-shaped JS object. Returns `null` if no card
+/// matches the packed value. Throws a string error if the card
+/// registry failed to build (malformed JSON, unknown aspects, etc.).
 #[wasm_bindgen(js_name = decodeDefinition)]
 pub fn decode_definition(packed: u16) -> Result<JsValue, JsValue> {
   let opt = core_decode_definition(packed).map_err(|e| JsValue::from_str(&e))?;
@@ -124,6 +127,38 @@ pub fn card_flag_field_value(flags: u32, name: &str) -> Result<Option<u32>, JsVa
   Ok(field.map(|f| (flags & f.mask()) >> f.shift as u32))
 }
 
+/// Read the numeric value of a named trait off a packed card
+/// definition. Returns `null` when:
+/// - the trait name isn't in `traits.json`,
+/// - the def doesn't carry that trait,
+/// - or the packed def doesn't resolve to a registered card.
+///
+/// Source-of-truth pair with the server's
+/// `def.trait_value(trait_id("name"))` path — both go through the
+/// same `CardDefinition::trait_value` lookup, so client and server
+/// agree on cost / speed numbers by construction.
+///
+/// Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
+/// resolve per-tile `cost` and per-soul `speed` for the step-time
+/// calculation, mirroring the server validator in
+/// `movement::move_soul_path`.
+#[wasm_bindgen(js_name = traitValue)]
+pub fn trait_value(packed_def: u16, name: &str) -> Result<Option<f32>, JsValue> {
+  let trait_id = match crate::definition_core::trait_id(name)
+    .map_err(|e| JsValue::from_str(&e))?
+  {
+    Some(id) => id,
+    None => return Ok(None),
+  };
+  let def = match crate::definition_core::decode_definition(packed_def)
+    .map_err(|e| JsValue::from_str(&e))?
+  {
+    Some(d) => d,
+    None => return Ok(None),
+  };
+  Ok(def.trait_value(trait_id))
+}
+
 /// Find the best-matching `Stack(direction)` recipe for a chain.
 /// `hex_def` is the packed definition of the hex card the chain root is
 /// attached to (`0` if not stacked on hex). `root_def` is the loose
@@ -196,6 +231,124 @@ pub fn match_stack_recipe(
   }
 }
 
+/// Compact JS-facing view of a recipe. `RecipeDef` itself isn't
+/// `Serialize` (its `Entity` predicates are complex enums with
+/// references), so the wasm boundary returns just the fields the
+/// client typically needs.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecipeBrief {
+  /// Packed recipe id — what `proposeAction` takes as `recipeId`.
+  recipe_index: u16,
+  /// Top-level recipe-type discriminant: `"stack" | "magnetic" |
+  /// "on_create"`. Combined with `direction`, the client knows which
+  /// matcher to call.
+  recipe_type: &'static str,
+  /// `0 = up, 1 = down`. Only meaningful for `stack` / `magnetic`
+  /// types; defaults to `0` for `on_create` (which has no direction).
+  direction: u8,
+  /// Number of slots the recipe declares. The client needs this many
+  /// inventory cards (in declared order) to fill the recipe.
+  slot_count: u32,
+  /// Whether the recipe declares a root entity.
+  has_root: bool,
+  /// Whether the recipe declares a hex entity.
+  has_hex: bool,
+}
+
+/// Look up a recipe by its tree-key (third-level key under
+/// `<type>/<category>/<key>` in `recipes/data/*.json`). Returns a
+/// `RecipeBrief`-shaped JS object on hit, `null` on miss. Throws on
+/// registry-build failure.
+///
+/// Used by [`MagneticResolutionManager`](../../../../pixijs/src/game/magnetic/MagneticResolutionManager.ts)
+/// to resolve a card def's `magneticRecipeKey` into the packed
+/// recipe id needed for `proposeAction`, plus enough metadata
+/// (slot count, direction) to drive client-side slot scanning.
+#[wasm_bindgen(js_name = findRecipeByKey)]
+pub fn find_recipe_by_key(key: &str) -> Result<JsValue, JsValue> {
+  let opt = core_find_recipe(key).map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(r) => {
+      let (recipe_type, direction) = match r.recipe_type {
+        crate::recipe_core::RecipeType::Stack(d) => {
+          ("stack", direction_to_u8(d))
+        }
+        crate::recipe_core::RecipeType::Magnetic(d) => {
+          ("magnetic", direction_to_u8(d))
+        }
+        crate::recipe_core::RecipeType::OnCreate => ("on_create", 0),
+      };
+      let brief = RecipeBrief {
+        recipe_index: r.index,
+        recipe_type,
+        direction,
+        slot_count: r.slots.len() as u32,
+        has_root: r.root.is_some(),
+        has_hex: r.hex.is_some(),
+      };
+      serde_wasm_bindgen::to_value(&brief)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    None => Ok(JsValue::NULL),
+  }
+}
+
+fn direction_to_u8(d: StackDirection) -> u8 {
+  match d {
+    StackDirection::Up => 0,
+    StackDirection::Down => 1,
+  }
+}
+
+/// Try to match a magnetic recipe against `(root_def, slot_defs)`.
+/// Mirrors the server-side `match_magnetic_recipe` (Phase 2 of the
+/// magnetic rewrite). Returns a `StackMatch`-shaped JS object on
+/// success or `null` if the predicates don't fit. Throws on
+/// registry-build failure or invalid direction.
+///
+/// `direction` is `0 = up`, `1 = down`. The client looks up the
+/// magnetic card's `magneticRecipeKey` to know the direction (the
+/// recipe's `recipe_type` encodes it).
+#[wasm_bindgen(js_name = matchMagneticRecipe)]
+pub fn match_magnetic_recipe(
+  root_def: u16,
+  slot_defs: Vec<u16>,
+  direction: u8,
+  root_above: Vec<u16>,
+  actor_above: Vec<u16>,
+  root_below: Vec<u16>,
+  actor_below: Vec<u16>,
+) -> Result<JsValue, JsValue> {
+  let dir = match direction {
+    0 => StackDirection::Up,
+    1 => StackDirection::Down,
+    _ => {
+      return Err(JsValue::from_str(&format!(
+        "matchMagneticRecipe: invalid direction {} (expected 0 = up, 1 = down)",
+        direction,
+      )));
+    }
+  };
+  let root_above_defs = decode_def_pool(&root_above)?;
+  let actor_above_defs = decode_def_pool(&actor_above)?;
+  let root_below_defs = decode_def_pool(&root_below)?;
+  let actor_below_defs = decode_def_pool(&actor_below)?;
+  let has_candidates = HasCandidates {
+    root_above: root_above_defs,
+    actor_above: actor_above_defs,
+    root_below: root_below_defs,
+    actor_below: actor_below_defs,
+  };
+  let opt = core_match_magnetic_recipe(root_def, &slot_defs, dir, Some(&has_candidates))
+    .map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(m) => serde_wasm_bindgen::to_value(&m)
+      .map_err(|e| JsValue::from_str(&e.to_string())),
+    None => Ok(JsValue::NULL),
+  }
+}
+
 /// Decode a packed-def array into `&CardDefinition` refs, dropping
 /// any entries that don't resolve. Used by `match_stack_recipe` to
 /// build the four has-candidate pools — unknown packed values are
@@ -226,4 +379,17 @@ fn decode_def_pool(packed: &[u16]) -> Result<Vec<&'static CardDefinition>, JsVal
 pub fn starter_packs_for_soul(soul: &str) -> Result<JsValue, JsValue> {
   let packs = core_starter_packs_for_soul(soul).map_err(|e| JsValue::from_str(&e))?;
   serde_wasm_bindgen::to_value(&packs).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Every registered texture definition, in stable-id order. Each entry
+/// carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
+/// `size`, and `scale: { min, max }`. Returns an empty array when no
+/// textures are registered. Throws on registry-build failure.
+///
+/// Called once at startup by `TextureRegistry.ts` to build the client-side
+/// lookup map; not intended for per-frame use.
+#[wasm_bindgen(js_name = allTextures)]
+pub fn all_textures() -> Result<JsValue, JsValue> {
+  let txs = core_textures().map_err(|e| JsValue::from_str(&e))?;
+  serde_wasm_bindgen::to_value(&txs).map_err(|e| JsValue::from_str(&e.to_string()))
 }

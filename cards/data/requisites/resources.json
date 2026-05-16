@@ -1,12 +1,18 @@
 {
   "requisite": {
-    "default": {
-      "log": {
-        "style": ["#8B5E3C", "#ecd6aa", "#0b1426"]
-      },
-      "stone": {
-        "style": ["#8A857C", "#ecd6aa", "#0b1426"]
-      }
+    "log": {
+      "style": [
+        "#8B5E3C",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "stone": {
+      "style": [
+        "#8A857C",
+        "#ecd6aa",
+        "#0b1426"
+      ]
     }
   }
 }

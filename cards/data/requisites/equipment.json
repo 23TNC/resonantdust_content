@@ -1,12 +1,18 @@
 {
   "requisite": {
-    "default": {
-      "axe": {
-        "style": ["#8B5E3C", "#ecd6aa", "#0b1426"]
-      },
-      "pickaxe": {
-        "style": ["#8A857C", "#ecd6aa", "#0b1426"]
-      }
+    "axe": {
+      "style": [
+        "#8B5E3C",
+        "#ecd6aa",
+        "#0b1426"
+      ]
+    },
+    "pickaxe": {
+      "style": [
+        "#8A857C",
+        "#ecd6aa",
+        "#0b1426"
+      ]
     }
   }
 }

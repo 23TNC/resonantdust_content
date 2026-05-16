@@ -24,11 +24,20 @@
 //!                   `content/starter_packs/`. Each pack is a soul-scoped
 //!                   bundle of card-key → count pairs; card keys are
 //!                   resolved through `definition_core`.
+//! - [`texture_core`]  texture registry, built lazily from
+//!                   `content/textures/`. Each texture is a render hint
+//!                   (`object`, `size`, `scale`) keyed by
+//!                   `(card_type, aspect_name)` — cards of that type
+//!                   carrying the aspect render with the entry's spec.
+//!                   Aspect names resolve through `definition_core`.
+//!                   Client-side only — the server loads but never
+//!                   reads textures.
 
 pub mod packed;
 pub mod definition_core;
 pub mod recipe_core;
 pub mod starter_pack_core;
+pub mod texture_core;
 pub mod flags_core;
 pub mod locales_core;
 
@@ -36,11 +45,11 @@ pub mod locales_core;
 mod wasm_api;
 
 /// `(rel_path, contents)` slices for every `*.json` under `cards/data/`,
-/// `recipes/data/`, and `starter_packs/data/`, populated at compile time by
-/// `build.rs`. The registries iterate these instead of hard-coding filenames,
-/// so adding / removing / renaming a data file needs no source edit — cargo
-/// notices via the build script's `rerun-if-changed` hooks and the slice
-/// regenerates.
+/// `recipes/data/`, `starter_packs/data/`, `textures/data/`, and
+/// `locales/`, populated at compile time by `build.rs`. The registries
+/// iterate these instead of hard-coding filenames, so adding / removing
+/// / renaming a data file needs no source edit — cargo notices via the
+/// build script's `rerun-if-changed` hooks and the slice regenerates.
 mod embedded_data {
   include!(concat!(env!("OUT_DIR"), "/data_files.rs"));
 }

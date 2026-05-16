@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-gen-ids.py — Generate stable ID mappings for recipes, cards, and starter packs.
+gen-ids.py — Generate stable ID mappings for recipes, cards, starter packs, and textures.
 
 Produces:
   recipes/id.json        { "<type>": { "<category>": { "<recipe-id>": <stable-int>, ... } } }
-  cards/id.json          { "<card_type>": { "<category>": { "<key>": <definition_id>, ... } } }
+  cards/id.json          { "<card_type>": { "<key>": <definition_id>, ... } }
   starter_packs/id.json  { "<soul>": { "<pack_id>": <stable-int>, ... } }
+  textures/id.json       { "<card_type>": { "<key>": <texture_id>, ... } }
 
-Reads recipe / card / starter-pack definition files from
+Reads recipe / card / starter-pack / texture definition files from
 `<root>/data/**/*.json` under each subsystem. Sibling metadata
 (types.json, aspects.json, flags.json, traits.json, the id.json files
 themselves) is ignored.
@@ -16,12 +17,20 @@ Recipe IDs are scoped per (type, category): stack/up, stack/down, on_create/self
 have their own counter starting at 1. Duplicate recipe ids across any type/category
 are an error.
 
-Card definition_ids are u8 (1–255) scoped per (card_type, category); 0 is reserved as
-sentinel. The server combines a card's definition_id with its bucket's type
-and category at build time to produce the packed_definition wire format.
+Card definition_ids are u12 (1–4095) scoped per card_type; 0 is reserved
+as sentinel. The server combines a card's definition_id with its
+`card_type` at build time to produce the packed_definition wire format.
+(The `card_category` dimension was retired — see
+docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md.)
 
 Starter pack IDs are scoped per soul: two souls can share the same pack id
 (e.g. both have a `"default"`), but `(soul, pack_id)` pairs must be unique.
+
+Texture IDs are u16 (1–65535) scoped per card_type — textures live in
+the same `<type>.<key>` namespace that cards do, but the key set is
+independent (a `tile/wood` texture has no relation to a `tile/wood`
+card, if one ever existed). Two types can each have a `"wood"`
+texture with id 1.
 
 Modes:
   default      Rewrite both id.json files from scratch. IDs are reassigned
@@ -158,7 +167,7 @@ def gen_recipe_ids(data_dir: Path, skip_known: bool) -> bool:
 
 # ── Cards ──────────────────────────────────────────────────────────────────────
 
-MAX_DEFINITION_ID = 255  # u8; 0 is sentinel
+MAX_DEFINITION_ID = 0xFFF  # u12; 0 is sentinel
 
 
 def gen_card_ids(data_dir: Path, skip_known: bool) -> bool:
@@ -173,9 +182,12 @@ def gen_card_ids(data_dir: Path, skip_known: bool) -> bool:
         # key is treated as new; no tombstones are preserved.
         existing = {}
 
-    # Collect cards grouped by (type, category), checking for duplicate keys globally.
-    by_type_cat: dict[tuple[str, str], list[str]] = {}
-    all_keys: dict[str, tuple[str, str]] = {}  # key -> (type, category) for duplicate check
+    # Collect cards grouped by type, checking for duplicate keys
+    # globally. The `category` middle dimension was retired (see
+    # docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md) — card defs now nest
+    # `{ <type>: { <key>: { ... } } }`.
+    by_type: dict[str, list[str]] = {}
+    all_keys: dict[str, str] = {}  # key -> type for duplicate check
     errors: list[str] = []
 
     for card_file in sorted(defs_dir.rglob("*.json")):
@@ -185,31 +197,23 @@ def gen_card_ids(data_dir: Path, skip_known: bool) -> bool:
         except json.JSONDecodeError as e:
             errors.append(f"{rel}: JSON parse error: {e}")
             continue
-        # Nested shape:
-        #   { "<card_type>": { "<category>": { "<key>": { ... } } } }
-        # Mirrors the Rust loader. Multiple types per file → multiple
-        # top-level keys.
         if not isinstance(root, dict):
             errors.append(f"{rel}: top-level must be an object keyed by card_type")
             continue
-        for type_name, by_category in root.items():
-            if not isinstance(by_category, dict):
+        for type_name, cards_obj in root.items():
+            if not isinstance(cards_obj, dict):
                 errors.append(f"{rel}: type {type_name!r}: value not an object")
                 continue
-            for category_name, cards_obj in by_category.items():
-                if not isinstance(cards_obj, dict):
-                    errors.append(f"{rel}: {type_name}/{category_name}: category value not an object")
-                    continue
-                for key in cards_obj:
-                    if key in all_keys:
-                        prev = all_keys[key]
-                        errors.append(
-                            f"Duplicate card key '{key}' in {rel}"
-                            f" (first seen under '{prev[0]}/{prev[1]}')"
-                        )
-                    else:
-                        all_keys[key] = (type_name, category_name)
-                        by_type_cat.setdefault((type_name, category_name), []).append(key)
+            for key in cards_obj:
+                if key in all_keys:
+                    prev = all_keys[key]
+                    errors.append(
+                        f"Duplicate card key '{key}' in {rel}"
+                        f" (first seen under type '{prev}')"
+                    )
+                else:
+                    all_keys[key] = type_name
+                    by_type.setdefault(type_name, []).append(key)
 
     if errors:
         for e in errors:
@@ -219,44 +223,43 @@ def gen_card_ids(data_dir: Path, skip_known: bool) -> bool:
     result: dict = {}
     n_active = n_added = n_removed = 0
 
-    for (type_name, category_name) in sorted(by_type_cat):
-        keys = by_type_cat[(type_name, category_name)]
-        cat_existing = existing.get(type_name, {}).get(category_name, {})
-        cat_result = dict(cat_existing)
-        nid = next_id(cat_result)
+    for type_name in sorted(by_type):
+        keys = by_type[type_name]
+        type_existing = existing.get(type_name, {})
+        type_result = dict(type_existing)
+        nid = next_id(type_result)
 
         for key in keys:
-            if key not in cat_result:
+            if key not in type_result:
                 if nid > MAX_DEFINITION_ID:
                     print(
-                        f"  ERROR: '{type_name}/{category_name}' definition_id {nid} exceeds u8 max ({MAX_DEFINITION_ID})",
+                        f"  ERROR: '{type_name}' definition_id {nid} exceeds u12 max ({MAX_DEFINITION_ID})",
                         file=sys.stderr,
                     )
                     return False
-                cat_result[key] = nid
+                type_result[key] = nid
                 if skip_known:
-                    print(f"    + {type_name}/{category_name}/{key} = {nid}")
+                    print(f"    + {type_name}/{key} = {nid}")
                 n_added += 1
                 nid += 1
 
         if skip_known:
-            removed = [k for k in cat_existing if k not in set(keys)]
+            removed = [k for k in type_existing if k not in set(keys)]
             for r in removed:
-                print(f"  WARNING: '{type_name}/{category_name}/{r}' (id={cat_existing[r]}) no longer in source — ID reserved")
+                print(f"  WARNING: '{type_name}/{r}' (id={type_existing[r]}) no longer in source — ID reserved")
             n_removed += len(removed)
         n_active += len(keys)
 
-        result.setdefault(type_name, {})[category_name] = dict(
-            sorted(cat_result.items(), key=lambda kv: kv[1])
+        result[type_name] = dict(
+            sorted(type_result.items(), key=lambda kv: kv[1])
         )
 
     if skip_known:
-        # Preserve tombstoned types/categories entirely.
-        for type_name, cats in existing.items():
-            for category_name, entries in cats.items():
-                if type_name not in result or category_name not in result.get(type_name, {}):
-                    print(f"  WARNING: '{type_name}/{category_name}' no longer in source — IDs reserved")
-                    result.setdefault(type_name, {})[category_name] = entries
+        # Preserve tombstoned types entirely.
+        for type_name, entries in existing.items():
+            if type_name not in result:
+                print(f"  WARNING: '{type_name}' no longer in source — IDs reserved")
+                result[type_name] = entries
 
     with open(id_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
@@ -375,6 +378,112 @@ def gen_starter_pack_ids(data_dir: Path, skip_known: bool) -> bool:
     return True
 
 
+# ── Textures ───────────────────────────────────────────────────────────────────
+
+MAX_TEXTURE_ID = 65535  # u16; 0 is sentinel
+
+
+def gen_texture_ids(data_dir: Path, skip_known: bool) -> bool:
+    textures_dir = data_dir / "textures"
+    defs_dir = textures_dir / "data"
+    id_path = textures_dir / "id.json"
+
+    if not defs_dir.exists():
+        # No texture data tree — nothing to generate. Skip silently.
+        print("  (no textures/data directory, skipping)")
+        return True
+
+    if skip_known:
+        existing: dict = load_json(id_path) if id_path.exists() else {}
+    else:
+        # Fresh-rebuild mode: ignore the existing file entirely.
+        existing = {}
+
+    # Collect textures grouped by card_type. Texture keys are scoped
+    # per type — `tile/wood` and `requisite/wood` are independent —
+    # so no global uniqueness check is needed. (`category` middle
+    # level retired with the cards-side retire — see
+    # docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md.)
+    by_type: dict[str, list[str]] = {}
+    errors: list[str] = []
+
+    for tex_file in sorted(defs_dir.rglob("*.json")):
+        rel = tex_file.relative_to(defs_dir).as_posix()
+        try:
+            root = load_json(tex_file)
+        except json.JSONDecodeError as e:
+            errors.append(f"{rel}: JSON parse error: {e}")
+            continue
+        if not isinstance(root, dict):
+            errors.append(f"{rel}: top-level must be an object keyed by card_type")
+            continue
+        for type_name, textures_obj in root.items():
+            if not isinstance(textures_obj, dict):
+                errors.append(f"{rel}: type {type_name!r}: value not an object")
+                continue
+            for key in textures_obj:
+                type_keys = by_type.setdefault(type_name, [])
+                if key in type_keys:
+                    errors.append(
+                        f"Duplicate texture key '{type_name}/{key}' in {rel}"
+                    )
+                else:
+                    type_keys.append(key)
+
+    if errors:
+        for e in errors:
+            print(f"  ERROR: {e}", file=sys.stderr)
+        return False
+
+    result: dict = {}
+    n_active = n_added = n_removed = 0
+
+    for type_name in sorted(by_type):
+        keys = by_type[type_name]
+        type_existing = existing.get(type_name, {})
+        type_result = dict(type_existing)
+        nid = next_id(type_result)
+
+        for key in keys:
+            if key not in type_result:
+                if nid > MAX_TEXTURE_ID:
+                    print(
+                        f"  ERROR: '{type_name}' texture_id {nid} exceeds u16 max ({MAX_TEXTURE_ID})",
+                        file=sys.stderr,
+                    )
+                    return False
+                type_result[key] = nid
+                if skip_known:
+                    print(f"    + {type_name}/{key} = {nid}")
+                n_added += 1
+                nid += 1
+
+        if skip_known:
+            removed = [k for k in type_existing if k not in set(keys)]
+            for r in removed:
+                print(f"  WARNING: '{type_name}/{r}' (id={type_existing[r]}) no longer in source — ID reserved")
+            n_removed += len(removed)
+        n_active += len(keys)
+
+        result[type_name] = dict(
+            sorted(type_result.items(), key=lambda kv: kv[1])
+        )
+
+    if skip_known:
+        # Preserve tombstoned types entirely.
+        for type_name, entries in existing.items():
+            if type_name not in result:
+                print(f"  WARNING: '{type_name}' no longer in source — IDs reserved")
+                result[type_name] = entries
+
+    with open(id_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
+        f.write("\n")
+
+    print(f"  {n_active} active, {n_added} new, {n_removed} removed")
+    return True
+
+
 # ── Locales ────────────────────────────────────────────────────────────────────
 #
 # Each domain (cards / recipes / starter_packs / …) keeps its
@@ -399,8 +508,9 @@ def gen_starter_pack_ids(data_dir: Path, skip_known: bool) -> bool:
 
 def walk_card_data_paths(data_dir: Path) -> set[str]:
     """Dotted paths for every card declared under `cards/data/`.
-    Shape: `<card_type>.<category>.<key>`."""
-    return _walk_nested_paths(data_dir / "cards" / "data", depth=3)
+    Shape: `<card_type>.<key>` (category was retired — see
+    docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md)."""
+    return _walk_nested_paths(data_dir / "cards" / "data", depth=2)
 
 
 def walk_recipe_data_paths(data_dir: Path) -> set[str]:
@@ -628,6 +738,10 @@ def main():
 
     print("Starter packs:")
     if not gen_starter_pack_ids(data_dir, args.skip_known):
+        ok = False
+
+    print("Textures:")
+    if not gen_texture_ids(data_dir, args.skip_known):
         ok = False
 
     print("Locales:")
