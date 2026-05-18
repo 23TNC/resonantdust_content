@@ -1,75 +1,44 @@
 {
-  "stack": {
-    "up": {
-      "cut_tree": {
-        "label": "cut tree",
-        "success": {
-          "simple": "{actor} chopped down {root}."
-        }
-      },
-      "break_rock": {
-        "label": "break rock",
-        "success": {
-          "simple": "{actor} broke {root}."
-        }
-      },
-      "corpus_up": {
-        "label": "corpus_up"
-      },
-      "dread_remover": {
-        "label": "dread_remover"
-      },
-      "triple_corpus": {
-        "label": "triple_corpus"
-      },
-      "despair_failure": {
-        "label": "despair_failure"
-      },
-      "strike_failure": {
-        "label": "strike_failure"
-      }
-    },
-    "down": {
-      "corpus_down": {
-        "label": "corpus_down"
-      },
-      "corpus_down_aspect": {
-        "label": "corpus_down_aspect"
-      }
+  "cut_tree": {
+    "label": "cut tree",
+    "success": {
+      "simple": "{actor} chopped down {root}."
     }
   },
-  "magnetic": {
-    "up": {
-      "despair_failure": {
-        "label": "despair_failure"
-      },
-      "despair_success": {
-        "label": "despair_success"
-      },
-      "strike_failure": {
-        "label": "strike_failure"
-      },
-      "strike_success": {
-        "label": "strike_success"
-      }
+  "break_rock": {
+    "label": "break rock",
+    "success": {
+      "simple": "{actor} broke {root}."
     }
   },
-  "on_create": {
-    "magnetic": {
-      "despair": {
-        "label": "despair"
-      },
-      "strike": {
-        "label": "strike"
-      }
-    },
-    "self": {
-      "corpus-": {
-        "label": "corpus-"
-      },
-      "fleeting": {
-        "label": "fleeting"
-      }
-    }
+  "corpus-": {
+    "label": "corpus-"
+  },
+  "corpus_down": {
+    "label": "corpus_down"
+  },
+  "corpus_up": {
+    "label": "corpus_up"
+  },
+  "despair_failure": {
+    "label": "despair_failure"
+  },
+  "despair_success": {
+    "label": "despair_success"
+  },
+  "dread_remover": {
+    "label": "dread_remover"
+  },
+  "fleeting": {
+    "label": "fleeting"
+  },
+  "strike_failure": {
+    "label": "strike_failure"
+  },
+  "strike_success": {
+    "label": "strike_success"
+  },
+  "triple_corpus": {
+    "label": "triple_corpus"
   }
 }

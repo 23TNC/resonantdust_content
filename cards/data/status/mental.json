@@ -5,6 +5,9 @@
     }
   },
   "event": {
+    "test": {
+      "style": [ "#3a3a4a", "#2a2a3a", "#0b1426" ]
+    },
     "despair": {
       "style": [ "#3a3a4a", "#2a2a3a", "#0b1426" ],
       "magnetic": {

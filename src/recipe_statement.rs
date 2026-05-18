@@ -18,17 +18,11 @@
 //!
 //! - [`Statement`] / [`Segment`] / [`StatementValue`] types.
 //! - [`parse_statement`] — one-string-in, statement-out.
-//! - [`parse_recipe_type_key`] — outer-file dotted-key dispatcher
-//!   (`stack.up` → `RecipeType::Stack(Up)`, bare `on_create` →
-//!   `RecipeType::OnCreate`).
 //! - [`is_reserved_aspect_name`] — closed-set check used to reject
 //!   aspect names that would collide with path-grammar tokens.
 //!
-//! Per-bucket grammar arms (input / output / duration / style)
-//! grow into this module in later phases; today's [`crate::recipe_core`]
-//! parsing path is untouched.
-
-use crate::recipe_core::{RecipeType, StackDirection};
+//! Recipe-level parsing — input/output statement arrays, iterator
+//! resolution, anchor classification — lives in [`crate::recipe_tape`].
 
 /// One segment of a dotted statement path. `Word("aspect")` for a
 /// plain identifier, `Index(0)` for the `0` in `slot.0`. Integer
@@ -62,7 +56,13 @@ impl Segment {
 /// separator and are stored verbatim (trimmed of the surrounding
 /// whitespace); integers are parsed eagerly so per-bucket grammars
 /// see typed numbers.
+///
+/// Serialized to JS untagged — Int becomes a number, Str becomes a
+/// string. Matches JSON-native typing so the client doesn't need to
+/// discriminate on a tag field.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "js", derive(serde::Serialize))]
+#[cfg_attr(feature = "js", serde(untagged))]
 pub enum StatementValue {
   Int(i64),
   Str(String),
@@ -206,46 +206,6 @@ fn parse_statement_value(s: &str) -> StatementValue {
   }
 }
 
-// ---------- Outer-key (file-level) dispatcher ----------------------------
-
-/// Resolve a recipe-file's top-level dotted key into a
-/// `RecipeType`. Supported forms:
-///
-/// | Key             | Resolves to                            |
-/// | --------------- | -------------------------------------- |
-/// | `stack.up`      | `RecipeType::Stack(StackDirection::Up)` |
-/// | `stack.down`    | `RecipeType::Stack(StackDirection::Down)` |
-/// | `magnetic.up`   | `RecipeType::Magnetic(StackDirection::Up)` |
-/// | `magnetic.down` | `RecipeType::Magnetic(StackDirection::Down)` |
-/// | `on_create`     | `RecipeType::OnCreate`                 |
-///
-/// Bare `on_create` collapses its `self` category — that's its only
-/// valid category per [content/recipes/types.json](content/recipes/types.json),
-/// so requiring authors to spell `on_create.self` everywhere would
-/// be noise. Single-segment keys are reserved for type-with-one-
-/// category cases.
-///
-/// Unknown shapes return `None` — callers (the registry loader) skip
-/// silently, matching today's `parse_recipe_type` discipline so
-/// content files can outpace the Rust enum.
-pub fn parse_recipe_type_key(key: &str) -> Option<RecipeType> {
-  let mut parts = key.split('.');
-  let head = parts.next()?;
-  let tail = parts.next();
-  // Reject trailing dotted segments — `stack.up.extra` is malformed.
-  if parts.next().is_some() {
-    return None;
-  }
-  match (head, tail) {
-    ("stack", Some("up")) => Some(RecipeType::Stack(StackDirection::Up)),
-    ("stack", Some("down")) => Some(RecipeType::Stack(StackDirection::Down)),
-    ("magnetic", Some("up")) => Some(RecipeType::Magnetic(StackDirection::Up)),
-    ("magnetic", Some("down")) => Some(RecipeType::Magnetic(StackDirection::Down)),
-    ("on_create", None) => Some(RecipeType::OnCreate),
-    _ => None,
-  }
-}
-
 // ---------- Reserved-word check ------------------------------------------
 
 /// Closed list of identifier tokens that appear as path-grammar
@@ -261,7 +221,7 @@ pub fn parse_recipe_type_key(key: &str) -> Option<RecipeType> {
 /// during aspect parsing (a reserved-name aspect should fail at the
 /// aspect-registry build, not deep inside the recipe registry).
 pub const RESERVED_PATH_TOKENS: &[&str] = &[
-  // Top-level buckets
+  // Top-level buckets (legacy — bucketed `input.X` / `output.X` form)
   "input",
   "output",
   "duration",
@@ -272,25 +232,39 @@ pub const RESERVED_PATH_TOKENS: &[&str] = &[
   "slot",
   "actor",
   "has",
+  // Stack-direction markers (tape form)
+  "up",
+  "down",
+  // Namespace anchors (tape form)
+  "sys",
+  "var",
   // Card resolvers (after an anchor)
   "owner",
   "parent",
   // Match selectors
   "def_id",
   "aspect",
-  // Predicates
+  // Predicate operators
   "min",
-  // Output effect buckets
+  "eq",
+  "ne",
+  "gt",
+  "ge",
+  "lt",
+  "le",
+  // Output effect buckets (legacy bucketed form)
   "create",
   "destroy",
   "modify",
-  // Modify ops
+  // Assignment / arithmetic ops (both bucketed and tape forms)
   "add",
   "sub",
   "set",
+  // Tape-form generator op
+  "random",
   // Locations
   "inventory",
-  // Duration tier markers
+  // Duration tier markers (legacy)
   "default",
   "when",
 ];
@@ -479,53 +453,6 @@ mod tests {
   fn bucket_returns_first_word() {
     let s = parse_statement("output.destroy.slot.0").unwrap();
     assert_eq!(s.bucket(), Some("output"));
-  }
-
-  // ---- outer-key dispatch ----------------------------------------------
-
-  #[test]
-  fn resolves_stack_up_and_down() {
-    assert_eq!(
-      parse_recipe_type_key("stack.up"),
-      Some(RecipeType::Stack(StackDirection::Up))
-    );
-    assert_eq!(
-      parse_recipe_type_key("stack.down"),
-      Some(RecipeType::Stack(StackDirection::Down))
-    );
-  }
-
-  #[test]
-  fn resolves_magnetic_up_and_down() {
-    assert_eq!(
-      parse_recipe_type_key("magnetic.up"),
-      Some(RecipeType::Magnetic(StackDirection::Up))
-    );
-    assert_eq!(
-      parse_recipe_type_key("magnetic.down"),
-      Some(RecipeType::Magnetic(StackDirection::Down))
-    );
-  }
-
-  #[test]
-  fn resolves_bare_on_create() {
-    assert_eq!(parse_recipe_type_key("on_create"), Some(RecipeType::OnCreate));
-  }
-
-  #[test]
-  fn rejects_old_nested_form() {
-    // `on_create.self` was the historical category-style key.
-    // Under the flat shape `on_create` is the canonical form;
-    // an `on_create.self` key is no longer valid.
-    assert_eq!(parse_recipe_type_key("on_create.self"), None);
-  }
-
-  #[test]
-  fn rejects_unknown_type_or_category() {
-    assert_eq!(parse_recipe_type_key("nope"), None);
-    assert_eq!(parse_recipe_type_key("stack"), None); // needs a direction
-    assert_eq!(parse_recipe_type_key("stack.sideways"), None);
-    assert_eq!(parse_recipe_type_key("stack.up.extra"), None);
   }
 
   // ---- reserved-word check --------------------------------------------

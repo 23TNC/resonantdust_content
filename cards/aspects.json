@@ -27,13 +27,23 @@
 
   "water": { "icon": "💧", "color": "#1E6B9E", "description": "Fresh water — drinking, irrigation, flow" },
 
+  "corpus--": { "icon": "🜔", "color": "#E67E7E", "description": "Injuries — wounds, broken bones, lasting harm" },
+  "corpus++": { "icon": "🜔", "color": "#E67E7E", "description": "Enhanced corpus — vigor, heightened resilience" },
   "corpus": {
-    "icon": "💪", "color": "#B04848", "description": "The body — physical capacity and health",
-    "corpus--": { "description": "Injuries — wounds, broken bones, lasting harm" },
+    "icon": "🜔", "color": "#E67E7E", "description": "The body — physical capacity and health",
     "corpus-":  { "description": "Fatigue — exhaustion, transient depletion" },
-    "corpus+":  { "description": "Standard corpus — baseline vitality" },
-    "corpus++": { "description": "Enhanced corpus — vigor, heightened resilience" }
+    "corpus+":  { "description": "Standard corpus — baseline vitality" }
   },
+
+  "anima": {
+    "icon": "🜍", "color": "#FFD966", "description": ""
+  },
+
+  "sollertia": {
+    "icon": "🜻", "color": "#97e3a7", "description": ""
+  },
+
+  "aether": { "icon": "🜕", "color": "#7D96E3", "description": "Spiritual or willful contribution" },
 
   "soul": { "icon": "♙", "color": "#4455AA", "description": "Spiritual or willful contribution" },
 

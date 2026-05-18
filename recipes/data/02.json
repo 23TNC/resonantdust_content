@@ -1,25 +1,32 @@
 {
-  "stack.up": {
-    "cut_tree": [
-      "input.hex.aspect.wood.min: 1",
-      "input.slot.0.aspect.corpus+.min: 1",
-      "input.has.def_id: axe",
-      "output.destroy.slot.0",
-      "output.modify.hex.aspect.wood.sub: 1",
-      "output.create.slot.0.owner.inventory: corpus-",
-      "output.create.slot.0.owner.inventory: log",
-      "duration.default: 10",
-      "style.default: rtl"
+  "cut_tree": {
+    "input": [
+      "hex.aspect.wood.min: 1",
+      "up.slot.0.aspect.corpus+.min: 1",
+      "up.slot.0.owner.up.slot.0.def_id: axe"
     ],
-    "break_rock": [
-      "input.hex.aspect.stone.min: 1",
-      "input.slot.0.def_id: corpus",
-      "output.destroy.slot.0",
-      "output.modify.hex.aspect.stone.sub: 1",
-      "output.create.slot.0.owner.inventory: corpus-",
-      "output.create.slot.0.owner.inventory: stone",
-      "duration.default: 10",
-      "style.default: rtl"
+    "output": [
+      "sys.duration.set: 10",
+      "sys.style.set: rtl",
+      "up.slot.0.destroy",
+      "hex.aspect.wood.sub: 1",
+      "up.slot.0.owner.inventory.create: corpus-",
+      "up.slot.0.owner.inventory.create: log"
+    ]
+  },
+
+  "break_rock": {
+    "input": [
+      "hex.aspect.stone.min: 1",
+      "up.slot.0.def_id: corpus"
+    ],
+    "output": [
+      "sys.duration.set: 10",
+      "sys.style.set: rtl",
+      "up.slot.0.destroy",
+      "hex.aspect.stone.sub: 1",
+      "up.slot.0.owner.inventory.create: corpus-",
+      "up.slot.0.owner.inventory.create: stone"
     ]
   }
 }

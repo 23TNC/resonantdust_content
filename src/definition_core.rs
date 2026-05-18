@@ -865,20 +865,19 @@ pub fn lifecycle_recipe_for_def(def: &CardDefinition) -> Result<Option<u16>, Str
   let Some(recipe_key) = def.lifecycle_recipe_key.as_deref() else {
     return Ok(None);
   };
-  let recipe = crate::recipe_core::find_recipe(recipe_key)?.ok_or_else(|| {
+  // Tape-form recipes share one flat namespace — there's no
+  // separate "magnetic recipe" kind to validate against. The
+  // magnetic discipline is now enforced by the server at
+  // `propose_action` time (a bound card with the magnetic flag
+  // must match its declared `magnetic.recipe`), so all we need
+  // here is that the recipe key resolves.
+  let id = crate::recipe_core::find_recipe_id(recipe_key)?.ok_or_else(|| {
     format!(
       "card {:?}: lifecycle.recipe {:?} not declared in any recipe file",
       def.key, recipe_key
     )
   })?;
-  let rt = recipe.recipe_type;
-  if !matches!(rt, crate::recipe_core::RecipeType::Magnetic(_)) {
-    return Err(format!(
-      "card {:?}: lifecycle.recipe {:?} resolves to a non-magnetic recipe (type {:?})",
-      def.key, recipe_key, rt
-    ));
-  }
-  Ok(Some(recipe.index))
+  Ok(Some(id))
 }
 
 /// Walk every registered card definition and validate that any

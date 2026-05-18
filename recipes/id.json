@@ -1,28 +1,14 @@
 {
-  "magnetic": {
-    "up": {
-      "despair_success": 1,
-      "strike_success": 2
-    }
-  },
-  "on_create": {
-    "self": {
-      "corpus-": 1,
-      "fleeting": 2
-    }
-  },
-  "stack": {
-    "down": {
-      "corpus_down": 1
-    },
-    "up": {
-      "triple_corpus": 1,
-      "dread_remover": 2,
-      "corpus_up": 3,
-      "despair_failure": 4,
-      "strike_failure": 5,
-      "cut_tree": 6,
-      "break_rock": 7
-    }
-  }
+  "triple_corpus": 1,
+  "dread_remover": 2,
+  "corpus_up": 3,
+  "corpus_down": 4,
+  "despair_success": 5,
+  "despair_failure": 6,
+  "strike_success": 7,
+  "strike_failure": 8,
+  "corpus-": 9,
+  "fleeting": 10,
+  "cut_tree": 11,
+  "break_rock": 12
 }

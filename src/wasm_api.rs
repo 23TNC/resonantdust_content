@@ -18,16 +18,14 @@ use crate::definition_core::{
   decode_definition as core_decode_definition,
   find_packed_by_key as core_find_packed_by_key,
   is_hex_type as core_is_hex_type,
-  CardDefinition,
 };
 use crate::flags_core::{
   card_flag_bit as core_card_flag_bit, card_flag_field as core_card_flag_field,
 };
 use crate::recipe_core::{
   find_recipe as core_find_recipe,
-  match_magnetic_recipe as core_match_magnetic_recipe,
-  match_stack_recipe_detail as core_match_stack_recipe_detail,
-  HasCandidates, StackDirection,
+  recipe as core_recipe,
+  recipes_by_priority as core_recipes_by_priority,
 };
 use crate::starter_pack_core::{
   starter_packs_for_soul as core_starter_packs_for_soul,
@@ -159,225 +157,86 @@ pub fn trait_value(packed_def: u16, name: &str) -> Result<Option<f32>, JsValue> 
   Ok(def.trait_value(trait_id))
 }
 
-/// Find the best-matching `Stack(direction)` recipe for a chain.
-/// `hex_def` is the packed definition of the hex card the chain root is
-/// attached to (`0` if not stacked on hex). `root_def` is the loose
-/// root's packed definition. `slot_defs` are the packed definitions of
-/// cards stacked above (`direction = 0` / "up") or below
-/// (`direction = 1` / "down") the root, in chain order.
+/// Look up a recipe by its stable `u16` id (the value
+/// `proposeAction` takes as `recipeId`). Returns the full Recipe IR
+/// serialized to JS — `{ id, input[], output[], iterators[], anchors }`
+/// — or `null` if the id isn't registered. Throws on registry-build
+/// failure.
 ///
-/// `root_above` / `actor_above` / `root_below` / `actor_below` are the
-/// packed definitions of cards stacked on each role's soul card in
-/// each direction (UP = equipment / above the soul, DOWN = action
-/// stack / below the soul). They feed the `has` / `reagents.has` /
-/// `has_below` / `reagents.has_below` feasibility filter: recipes
-/// whose has-predicates can't find any matching card in the
-/// corresponding pool are skipped before scoring. Pass empty arrays
-/// to mean "no equipment / nothing on the soul stack" — recipes
-/// that declare has-predicates will then be filtered out, which is
-/// the correct behaviour for an unattached player.
-///
-/// Unknown packed defs in any pool array are silently skipped (treat
-/// the registry as authoritative — a wire-side glitch shouldn't
-/// crash matching).
-///
-/// Returns a `StackMatch` object on success (with `recipeIndex`,
-/// `slotStart`, `slotCount`, `hasRoot`, `hasHex`) or `null` if no
-/// recipe matched. Throws on registry-build failure or invalid
-/// direction.
-#[wasm_bindgen(js_name = matchStackRecipe)]
-pub fn match_stack_recipe(
-  hex_def: u16,
-  hex_stock0: u8,
-  hex_stock1: u8,
-  hex_has_stocks: u8,
-  root_def: u16,
-  slot_defs: Vec<u16>,
-  direction: u8,
-  root_above: Vec<u16>,
-  actor_above: Vec<u16>,
-  root_below: Vec<u16>,
-  actor_below: Vec<u16>,
-) -> Result<JsValue, JsValue> {
-  let dir = match direction {
-    0 => StackDirection::Up,
-    1 => StackDirection::Down,
-    _ => {
-      return Err(JsValue::from_str(&format!(
-        "matchStackRecipe: invalid direction {} (expected 0 = up, 1 = down)",
-        direction,
-      )));
-    }
-  };
-  // `hex_has_stocks` is a 0/1 sentinel — `Option<(u8, u8)>` doesn't
-  // round-trip through `wasm_bindgen` directly. Caller passes `0`
-  // when the hex came from a Card row (no per-row stock; matcher
-  // falls back to static aspects) and `1` when the hex came from a
-  // synthetic tile slot (`stock0` / `stock1` are the per-tile u2s).
-  let hex_stocks = if hex_has_stocks != 0 {
-    Some((hex_stock0, hex_stock1))
-  } else {
-    None
-  };
-  let root_above_defs = decode_def_pool(&root_above)?;
-  let actor_above_defs = decode_def_pool(&actor_above)?;
-  let root_below_defs = decode_def_pool(&root_below)?;
-  let actor_below_defs = decode_def_pool(&actor_below)?;
-  let has_candidates = HasCandidates {
-    root_above: root_above_defs,
-    actor_above: actor_above_defs,
-    root_below: root_below_defs,
-    actor_below: actor_below_defs,
-  };
-  let opt = core_match_stack_recipe_detail(
-    hex_def,
-    hex_stocks,
-    root_def,
-    &slot_defs,
-    dir,
-    Some(&has_candidates),
-  )
-  .map_err(|e| JsValue::from_str(&e))?;
+/// Used by callers that already have the id (e.g., looking up a
+/// magnetic recipe via a card def's `magnetic.recipe` key resolved
+/// through `findPackedByKey`-style indirection).
+#[wasm_bindgen(js_name = recipeById)]
+pub fn recipe_by_id(id: u16) -> Result<JsValue, JsValue> {
+  let opt = core_recipe(id).map_err(|e| JsValue::from_str(&e))?;
   match opt {
-    Some(m) => serde_wasm_bindgen::to_value(&m)
+    Some(r) => serde_wasm_bindgen::to_value(r)
       .map_err(|e| JsValue::from_str(&e.to_string())),
     None => Ok(JsValue::NULL),
   }
 }
 
-/// Compact JS-facing view of a recipe. `RecipeDef` itself isn't
-/// `Serialize` (its `Entity` predicates are complex enums with
-/// references), so the wasm boundary returns just the fields the
-/// client typically needs.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RecipeBrief {
-  /// Packed recipe id — what `proposeAction` takes as `recipeId`.
-  recipe_index: u16,
-  /// Top-level recipe-type discriminant: `"stack" | "magnetic" |
-  /// "on_create"`. Combined with `direction`, the client knows which
-  /// matcher to call.
-  recipe_type: &'static str,
-  /// `0 = up, 1 = down`. Only meaningful for `stack` / `magnetic`
-  /// types; defaults to `0` for `on_create` (which has no direction).
-  direction: u8,
-  /// Number of slots the recipe declares. The client needs this many
-  /// inventory cards (in declared order) to fill the recipe.
-  slot_count: u32,
-  /// Whether the recipe declares a root entity.
-  has_root: bool,
-  /// Whether the recipe declares a hex entity.
-  has_hex: bool,
-}
-
-/// Look up a recipe by its tree-key (third-level key under
-/// `<type>/<category>/<key>` in `recipes/data/*.json`). Returns a
-/// `RecipeBrief`-shaped JS object on hit, `null` on miss. Throws on
+/// Look up a recipe by its source-key (e.g. `"cut_tree"`,
+/// `"strike_success"`). Returns the full Recipe IR serialized to JS
+/// or `null` if no recipe with that key is registered. Throws on
 /// registry-build failure.
 ///
-/// Used by [`MagneticResolutionManager`](../../../../pixijs/src/game/magnetic/MagneticResolutionManager.ts)
-/// to resolve a card def's `magneticRecipeKey` into the packed
-/// recipe id needed for `proposeAction`, plus enough metadata
-/// (slot count, direction) to drive client-side slot scanning.
-#[wasm_bindgen(js_name = findRecipeByKey)]
-pub fn find_recipe_by_key(key: &str) -> Result<JsValue, JsValue> {
+/// Used by callers that have a string key in hand — for example, a
+/// card def's `magnetic.recipe` field, or recipe-name lookups in
+/// debug tooling.
+#[wasm_bindgen(js_name = recipeByKey)]
+pub fn recipe_by_key(key: &str) -> Result<JsValue, JsValue> {
   let opt = core_find_recipe(key).map_err(|e| JsValue::from_str(&e))?;
   match opt {
-    Some(r) => {
-      let (recipe_type, direction) = match r.recipe_type {
-        crate::recipe_core::RecipeType::Stack(d) => {
-          ("stack", direction_to_u8(d))
-        }
-        crate::recipe_core::RecipeType::Magnetic(d) => {
-          ("magnetic", direction_to_u8(d))
-        }
-        crate::recipe_core::RecipeType::OnCreate => ("on_create", 0),
-      };
-      let brief = RecipeBrief {
-        recipe_index: r.index,
-        recipe_type,
-        direction,
-        slot_count: r.slots.len() as u32,
-        has_root: r.root.is_some(),
-        has_hex: r.hex.is_some(),
-      };
-      serde_wasm_bindgen::to_value(&brief)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-    None => Ok(JsValue::NULL),
-  }
-}
-
-fn direction_to_u8(d: StackDirection) -> u8 {
-  match d {
-    StackDirection::Up => 0,
-    StackDirection::Down => 1,
-  }
-}
-
-/// Try to match a magnetic recipe against `(root_def, slot_defs)`.
-/// Mirrors the server-side `match_magnetic_recipe` (Phase 2 of the
-/// magnetic rewrite). Returns a `StackMatch`-shaped JS object on
-/// success or `null` if the predicates don't fit. Throws on
-/// registry-build failure or invalid direction.
-///
-/// `direction` is `0 = up`, `1 = down`. The client looks up the
-/// magnetic card's `magneticRecipeKey` to know the direction (the
-/// recipe's `recipe_type` encodes it).
-#[wasm_bindgen(js_name = matchMagneticRecipe)]
-pub fn match_magnetic_recipe(
-  root_def: u16,
-  slot_defs: Vec<u16>,
-  direction: u8,
-  root_above: Vec<u16>,
-  actor_above: Vec<u16>,
-  root_below: Vec<u16>,
-  actor_below: Vec<u16>,
-) -> Result<JsValue, JsValue> {
-  let dir = match direction {
-    0 => StackDirection::Up,
-    1 => StackDirection::Down,
-    _ => {
-      return Err(JsValue::from_str(&format!(
-        "matchMagneticRecipe: invalid direction {} (expected 0 = up, 1 = down)",
-        direction,
-      )));
-    }
-  };
-  let root_above_defs = decode_def_pool(&root_above)?;
-  let actor_above_defs = decode_def_pool(&actor_above)?;
-  let root_below_defs = decode_def_pool(&root_below)?;
-  let actor_below_defs = decode_def_pool(&actor_below)?;
-  let has_candidates = HasCandidates {
-    root_above: root_above_defs,
-    actor_above: actor_above_defs,
-    root_below: root_below_defs,
-    actor_below: actor_below_defs,
-  };
-  let opt = core_match_magnetic_recipe(root_def, &slot_defs, dir, Some(&has_candidates))
-    .map_err(|e| JsValue::from_str(&e))?;
-  match opt {
-    Some(m) => serde_wasm_bindgen::to_value(&m)
+    Some(r) => serde_wasm_bindgen::to_value(r)
       .map_err(|e| JsValue::from_str(&e.to_string())),
     None => Ok(JsValue::NULL),
   }
 }
 
-/// Decode a packed-def array into `&CardDefinition` refs, dropping
-/// any entries that don't resolve. Used by `match_stack_recipe` to
-/// build the four has-candidate pools — unknown packed values are
-/// treated as "card not in catalog" rather than fatal, so a stale
-/// client def won't crash matching while a registry rebuild is
-/// pending.
-fn decode_def_pool(packed: &[u16]) -> Result<Vec<&'static CardDefinition>, JsValue> {
-  let mut out = Vec::with_capacity(packed.len());
-  for &p in packed {
-    match core_decode_definition(p).map_err(|e| JsValue::from_str(&e))? {
-      Some(def) => out.push(def),
-      None => continue,
-    }
+/// JS-facing entry in the `recipesAll` response: stable id plus the
+/// full Recipe IR. The id is what `proposeAction` carries on the
+/// wire; the recipe carries every field the client matcher needs to
+/// walk iterators and evaluate predicates.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecipeWithId<'a> {
+  id: u16,
+  recipe: &'a crate::recipe_core::Recipe,
+}
+
+/// Every registered recipe in priority-tiered order (highest priority
+/// first). Each entry is `{ id: u16, recipe: Recipe }` — the `id` is
+/// the stable u16 from `recipes/id.json` (what `proposeAction` takes),
+/// the `recipe` is the parsed IR including `iterators` and `anchors`.
+///
+/// Priority order is determined by [`crate::recipe_core::AnchorSet`]
+/// — anchor count first, then anchor priority (hex > root > up > down).
+/// The client matcher walks this array in order and stops at the first
+/// tier that yields successful binding(s).
+///
+/// Returns an empty array when no recipes are registered. Throws on
+/// registry-build failure.
+#[wasm_bindgen(js_name = recipesAll)]
+pub fn recipes_all() -> Result<JsValue, JsValue> {
+  let by_priority = core_recipes_by_priority().map_err(|e| JsValue::from_str(&e))?;
+  // The `recipe_core` API gives us `&Recipe`s but no parallel id
+  // list — so walk each one's source-key back to its id via
+  // `find_recipe_id`. Cheap (BTreeMap lookup per recipe), runs once
+  // at client startup.
+  let mut out: Vec<RecipeWithId> = Vec::with_capacity(by_priority.len());
+  for r in &by_priority {
+    let id = crate::recipe_core::find_recipe_id(&r.id)
+      .map_err(|e| JsValue::from_str(&e))?
+      .ok_or_else(|| {
+        JsValue::from_str(&format!(
+          "recipesAll: recipe {:?} present in registry but missing from id map (registry corrupt)",
+          r.id
+        ))
+      })?;
+    out.push(RecipeWithId { id, recipe: r });
   }
-  Ok(out)
+  serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// All starter packs registered for a given soul card key (e.g.

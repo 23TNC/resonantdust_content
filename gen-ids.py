@@ -3,7 +3,7 @@
 gen-ids.py — Generate stable ID mappings for recipes, cards, starter packs, and textures.
 
 Produces:
-  recipes/id.json        { "<type>": { "<category>": { "<recipe-id>": <stable-int>, ... } } }
+  recipes/id.json        { "<recipe-id>": <stable-int>, ... }
   cards/id.json          { "<card_type>": { "<key>": <definition_id>, ... } }
   starter_packs/id.json  { "<soul>": { "<pack_id>": <stable-int>, ... } }
   textures/id.json       { "<card_type>": { "<key>": <texture_id>, ... } }
@@ -13,9 +13,10 @@ Reads recipe / card / starter-pack / texture definition files from
 (types.json, aspects.json, flags.json, traits.json, the id.json files
 themselves) is ignored.
 
-Recipe IDs are scoped per (type, category): stack/up, stack/down, on_create/self each
-have their own counter starting at 1. Duplicate recipe ids across any type/category
-are an error.
+Recipe IDs share one flat namespace under the tape-form grammar (see
+`pixijs/src/content/src/recipe_tape.rs`). Each recipe file is shaped
+`{ "<recipe-id>": { "input": [...], "output": [...] }, ... }`.
+Duplicate recipe ids across any file are an error.
 
 Card definition_ids are u12 (1–4095) scoped per card_type; 0 is reserved
 as sentinel. The server combines a card's definition_id with its
@@ -69,9 +70,10 @@ def gen_recipe_ids(data_dir: Path, skip_known: bool) -> bool:
 
     if skip_known:
         raw = load_json(id_path) if id_path.exists() else {}
-        # Detect old flat format { "recipe_id": int } and discard it.
-        if raw and any(isinstance(v, int) for v in raw.values()):
-            print("  NOTE: recipes/id.json is in old flat format — resetting to nested format")
+        # Detect old nested-by-(type,category) format and discard it —
+        # tape-form recipes share one flat id namespace.
+        if raw and any(isinstance(v, dict) for v in raw.values()):
+            print("  NOTE: recipes/id.json is in old nested format — resetting to flat format")
             raw = {}
         existing: dict = raw
     else:
@@ -79,15 +81,9 @@ def gen_recipe_ids(data_dir: Path, skip_known: bool) -> bool:
         # entry is treated as new; no tombstones are preserved.
         existing = {}
 
-    by_type_cat: dict[tuple[str, str], list[str]] = {}
-    all_ids: dict[str, tuple[str, str]] = {}  # id -> (type, category) for duplicate check
+    all_ids: list[str] = []
+    seen: dict[str, str] = {}  # rid -> first file that declared it
     errors: list[str] = []
-
-    # `on_create` collapses its only category (`self`) to a bare
-    # top-level key. Other single-category-per-type entries would
-    # collapse the same way. Mirrors the Rust outer-key dispatcher in
-    # `content/src/recipe_statement.rs::parse_recipe_type_key`.
-    IMPLICIT_CATEGORY = {"on_create": "self"}
 
     for recipe_file in sorted(defs_dir.rglob("*.json")):
         rel = recipe_file.relative_to(defs_dir).as_posix()
@@ -96,90 +92,58 @@ def gen_recipe_ids(data_dir: Path, skip_known: bool) -> bool:
         except json.JSONDecodeError as e:
             errors.append(f"{rel}: JSON parse error: {e}")
             continue
-        # Flat-key shape:
-        #   { "<type>.<category>": { "<key>": [statement, ...] } }
-        # or, for single-category types:
-        #   { "<type>": { "<key>": [statement, ...] } }
-        # Multiple type-keys per file → multiple top-level keys.
+        # Tape-form shape: { "<recipe-id>": { "input": [...], "output": [...] }, ... }
         if not isinstance(root, dict):
-            errors.append(f"{rel}: top-level must be an object keyed by `<type>` or `<type>.<category>`")
+            errors.append(f"{rel}: top-level must be an object keyed by recipe id")
             continue
-        for type_key, recipes_obj in root.items():
-            # Skip JSON-doc convention keys (`_comment`, etc.) — same
-            # tolerance the Rust loader applies for unknown keys.
-            if type_key.startswith("_"):
+        for rid, recipe_obj in root.items():
+            # Skip JSON-doc convention keys (`_comment`, etc.).
+            if rid.startswith("_"):
                 continue
-            parts = type_key.split(".")
-            if len(parts) == 1:
-                btype = parts[0]
-                category = IMPLICIT_CATEGORY.get(btype)
-                if category is None:
-                    errors.append(f"{rel}: top-level key {type_key!r}: missing `.<category>`")
-                    continue
-            elif len(parts) == 2:
-                btype, category = parts
+            if not isinstance(recipe_obj, dict):
+                errors.append(f"{rel}: recipe {rid!r}: value must be an object with `input` and `output` arrays")
+                continue
+            if "input" not in recipe_obj or "output" not in recipe_obj:
+                errors.append(f"{rel}: recipe {rid!r}: missing `input` and/or `output` array")
+                continue
+            if rid in seen:
+                errors.append(f"Duplicate recipe id '{rid}' in {rel} (first seen in {seen[rid]})")
             else:
-                errors.append(f"{rel}: top-level key {type_key!r}: too many `.`-segments")
-                continue
-            if not isinstance(recipes_obj, dict):
-                errors.append(f"{rel}: {type_key}: value not an object of recipe keys")
-                continue
-            for rid in recipes_obj:
-                if rid in all_ids:
-                    prev = all_ids[rid]
-                    errors.append(
-                        f"Duplicate recipe id '{rid}' in {rel}"
-                        f" (first seen under '{prev[0]}/{prev[1]}')"
-                    )
-                else:
-                    all_ids[rid] = (btype, category)
-                    by_type_cat.setdefault((btype, category), []).append(rid)
+                seen[rid] = rel
+                all_ids.append(rid)
 
     if errors:
         for e in errors:
             print(f"  ERROR: {e}", file=sys.stderr)
         return False
 
-    result: dict = {}
-    n_active = n_added = n_removed = 0
+    result: dict = dict(existing) if skip_known else {}
+    nid = next_id(result) if result else 1
+    n_added = 0
 
-    for (type_name, category_name) in sorted(by_type_cat):
-        ids = by_type_cat[(type_name, category_name)]
-        cat_existing = existing.get(type_name, {}).get(category_name, {})
-        cat_result = dict(cat_existing)
-        nid = next_id(cat_result)
+    for rid in all_ids:
+        if rid not in result:
+            result[rid] = nid
+            if skip_known:
+                print(f"    + {rid} = {nid}")
+            n_added += 1
+            nid += 1
 
-        for rid in ids:
-            if rid not in cat_result:
-                cat_result[rid] = nid
-                if skip_known:
-                    print(f"    + {type_name}/{category_name}/{rid} = {nid}")
-                n_added += 1
-                nid += 1
-
-        if skip_known:
-            removed = [k for k in cat_existing if k not in set(ids)]
-            for r in removed:
-                print(f"  WARNING: '{type_name}/{category_name}/{r}' (id={cat_existing[r]}) no longer in source — ID reserved")
-            n_removed += len(removed)
-        n_active += len(ids)
-
-        result.setdefault(type_name, {})[category_name] = dict(
-            sorted(cat_result.items(), key=lambda kv: kv[1])
-        )
-
+    n_removed = 0
     if skip_known:
-        # Preserve tombstoned types/categories entirely.
-        for type_name, cats in existing.items():
-            for category_name, entries in cats.items():
-                if type_name not in result or category_name not in result.get(type_name, {}):
-                    print(f"  WARNING: '{type_name}/{category_name}' no longer in source — IDs reserved")
-                    result.setdefault(type_name, {})[category_name] = entries
+        active = set(all_ids)
+        removed = [k for k in existing if k not in active]
+        for r in removed:
+            print(f"  WARNING: '{r}' (id={existing[r]}) no longer in source — ID reserved")
+        n_removed = len(removed)
+
+    result_sorted = dict(sorted(result.items(), key=lambda kv: kv[1]))
 
     with open(id_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        json.dump(result_sorted, f, indent=2)
         f.write("\n")
 
+    n_active = len(all_ids)
     print(f"  {n_active} active, {n_added} new, {n_removed} removed")
     return True
 
@@ -534,8 +498,8 @@ def walk_card_data_paths(data_dir: Path) -> set[str]:
 
 def walk_recipe_data_paths(data_dir: Path) -> set[str]:
     """Dotted paths for every recipe declared under `recipes/data/`.
-    Shape: `<recipe_type>.<category>.<key>`."""
-    return _walk_nested_paths(data_dir / "recipes" / "data", depth=3)
+    Shape: `<recipe-id>` (tape-form recipes share one flat namespace)."""
+    return _walk_nested_paths(data_dir / "recipes" / "data", depth=1)
 
 
 def _walk_nested_paths(defs_dir: Path, depth: int) -> set[str]:

@@ -155,29 +155,6 @@ export function findPackedByKey(key) {
 }
 
 /**
- * Look up a recipe by its tree-key (third-level key under
- * `<type>/<category>/<key>` in `recipes/data/*.json`). Returns a
- * `RecipeBrief`-shaped JS object on hit, `null` on miss. Throws on
- * registry-build failure.
- *
- * Used by [`MagneticResolutionManager`](../../../../pixijs/src/game/magnetic/MagneticResolutionManager.ts)
- * to resolve a card def's `magneticRecipeKey` into the packed
- * recipe id needed for `proposeAction`, plus enough metadata
- * (slot count, direction) to drive client-side slot scanning.
- * @param {string} key
- * @returns {any}
- */
-export function findRecipeByKey(key) {
-    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.findRecipeByKey(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
-}
-
-/**
  * @returns {number}
  */
 export function inventoryLayer() {
@@ -207,101 +184,6 @@ export function isHexType(type_id) {
 export function isStackLayout(stacked_state, surface) {
     const ret = wasm.isStackLayout(stacked_state, surface);
     return ret !== 0;
-}
-
-/**
- * Try to match a magnetic recipe against `(root_def, slot_defs)`.
- * Mirrors the server-side `match_magnetic_recipe` (Phase 2 of the
- * magnetic rewrite). Returns a `StackMatch`-shaped JS object on
- * success or `null` if the predicates don't fit. Throws on
- * registry-build failure or invalid direction.
- *
- * `direction` is `0 = up`, `1 = down`. The client looks up the
- * magnetic card's `magneticRecipeKey` to know the direction (the
- * recipe's `recipe_type` encodes it).
- * @param {number} root_def
- * @param {Uint16Array} slot_defs
- * @param {number} direction
- * @param {Uint16Array} root_above
- * @param {Uint16Array} actor_above
- * @param {Uint16Array} root_below
- * @param {Uint16Array} actor_below
- * @returns {any}
- */
-export function matchMagneticRecipe(root_def, slot_defs, direction, root_above, actor_above, root_below, actor_below) {
-    const ptr0 = passArray16ToWasm0(slot_defs, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray16ToWasm0(root_above, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray16ToWasm0(actor_above, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray16ToWasm0(root_below, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ptr4 = passArray16ToWasm0(actor_below, wasm.__wbindgen_malloc);
-    const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.matchMagneticRecipe(root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
-}
-
-/**
- * Find the best-matching `Stack(direction)` recipe for a chain.
- * `hex_def` is the packed definition of the hex card the chain root is
- * attached to (`0` if not stacked on hex). `root_def` is the loose
- * root's packed definition. `slot_defs` are the packed definitions of
- * cards stacked above (`direction = 0` / "up") or below
- * (`direction = 1` / "down") the root, in chain order.
- *
- * `root_above` / `actor_above` / `root_below` / `actor_below` are the
- * packed definitions of cards stacked on each role's soul card in
- * each direction (UP = equipment / above the soul, DOWN = action
- * stack / below the soul). They feed the `has` / `reagents.has` /
- * `has_below` / `reagents.has_below` feasibility filter: recipes
- * whose has-predicates can't find any matching card in the
- * corresponding pool are skipped before scoring. Pass empty arrays
- * to mean "no equipment / nothing on the soul stack" — recipes
- * that declare has-predicates will then be filtered out, which is
- * the correct behaviour for an unattached player.
- *
- * Unknown packed defs in any pool array are silently skipped (treat
- * the registry as authoritative — a wire-side glitch shouldn't
- * crash matching).
- *
- * Returns a `StackMatch` object on success (with `recipeIndex`,
- * `slotStart`, `slotCount`, `hasRoot`, `hasHex`) or `null` if no
- * recipe matched. Throws on registry-build failure or invalid
- * direction.
- * @param {number} hex_def
- * @param {number} hex_stock0
- * @param {number} hex_stock1
- * @param {number} hex_has_stocks
- * @param {number} root_def
- * @param {Uint16Array} slot_defs
- * @param {number} direction
- * @param {Uint16Array} root_above
- * @param {Uint16Array} actor_above
- * @param {Uint16Array} root_below
- * @param {Uint16Array} actor_below
- * @returns {any}
- */
-export function matchStackRecipe(hex_def, hex_stock0, hex_stock1, hex_has_stocks, root_def, slot_defs, direction, root_above, actor_above, root_below, actor_below) {
-    const ptr0 = passArray16ToWasm0(slot_defs, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray16ToWasm0(root_above, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray16ToWasm0(actor_above, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray16ToWasm0(root_below, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ptr4 = passArray16ToWasm0(actor_below, wasm.__wbindgen_malloc);
-    const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.matchStackRecipe(hex_def, hex_stock0, hex_stock1, hex_has_stocks, root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -388,6 +270,72 @@ export function packZoneDefinition(card_type) {
 export function pocketDimensionLayer() {
     const ret = wasm.pocketDimensionLayer();
     return ret;
+}
+
+/**
+ * Look up a recipe by its stable `u16` id (the value
+ * `proposeAction` takes as `recipeId`). Returns the full Recipe IR
+ * serialized to JS — `{ id, input[], output[], iterators[], anchors }`
+ * — or `null` if the id isn't registered. Throws on registry-build
+ * failure.
+ *
+ * Used by callers that already have the id (e.g., looking up a
+ * magnetic recipe via a card def's `magnetic.recipe` key resolved
+ * through `findPackedByKey`-style indirection).
+ * @param {number} id
+ * @returns {any}
+ */
+export function recipeById(id) {
+    const ret = wasm.recipeById(id);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Look up a recipe by its source-key (e.g. `"cut_tree"`,
+ * `"strike_success"`). Returns the full Recipe IR serialized to JS
+ * or `null` if no recipe with that key is registered. Throws on
+ * registry-build failure.
+ *
+ * Used by callers that have a string key in hand — for example, a
+ * card def's `magnetic.recipe` field, or recipe-name lookups in
+ * debug tooling.
+ * @param {string} key
+ * @returns {any}
+ */
+export function recipeByKey(key) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.recipeByKey(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Every registered recipe in priority-tiered order (highest priority
+ * first). Each entry is `{ id: u16, recipe: Recipe }` — the `id` is
+ * the stable u16 from `recipes/id.json` (what `proposeAction` takes),
+ * the `recipe` is the parsed IR including `iterators` and `anchors`.
+ *
+ * Priority order is determined by [`crate::recipe_core::AnchorSet`]
+ * — anchor count first, then anchor priority (hex > root > up > down).
+ * The client matcher walks this array in order and stops at the first
+ * tier that yields successful binding(s).
+ *
+ * Returns an empty array when no recipes are registered. Throws on
+ * registry-build failure.
+ * @returns {any}
+ */
+export function recipesAll() {
+    const ret = wasm.recipesAll();
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -519,6 +467,10 @@ export function worldLayer() {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg_Error_bce6d499ff0a4aff: function(arg0, arg1) {
+            const ret = Error(getStringFromWasm0(arg0, arg1));
+            return ret;
+        },
         __wbg_String_8564e559799eccda: function(arg0, arg1) {
             const ret = String(arg1);
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -548,7 +500,12 @@ function __wbg_get_imports() {
             const ret = arg0;
             return ret;
         },
-        __wbindgen_cast_0000000000000002: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000002: function(arg0) {
+            // Cast intrinsic for `I64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
@@ -581,27 +538,12 @@ function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
 }
 
-let cachedUint16ArrayMemory0 = null;
-function getUint16ArrayMemory0() {
-    if (cachedUint16ArrayMemory0 === null || cachedUint16ArrayMemory0.byteLength === 0) {
-        cachedUint16ArrayMemory0 = new Uint16Array(wasm.memory.buffer);
-    }
-    return cachedUint16ArrayMemory0;
-}
-
 let cachedUint8ArrayMemory0 = null;
 function getUint8ArrayMemory0() {
     if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
-}
-
-function passArray16ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 2, 2) >>> 0;
-    getUint16ArrayMemory0().set(arg, ptr / 2);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {
@@ -682,7 +624,6 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
-    cachedUint16ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

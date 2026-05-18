@@ -75,19 +75,6 @@ export function decodeDefinition(packed: number): any;
  */
 export function findPackedByKey(key: string): number | undefined;
 
-/**
- * Look up a recipe by its tree-key (third-level key under
- * `<type>/<category>/<key>` in `recipes/data/*.json`). Returns a
- * `RecipeBrief`-shaped JS object on hit, `null` on miss. Throws on
- * registry-build failure.
- *
- * Used by [`MagneticResolutionManager`](../../../../pixijs/src/game/magnetic/MagneticResolutionManager.ts)
- * to resolve a card def's `magneticRecipeKey` into the packed
- * recipe id needed for `proposeAction`, plus enough metadata
- * (slot count, direction) to drive client-side slot scanning.
- */
-export function findRecipeByKey(key: string): any;
-
 export function inventoryLayer(): number;
 
 /**
@@ -97,49 +84,6 @@ export function inventoryLayer(): number;
 export function isHexType(type_id: number): boolean;
 
 export function isStackLayout(stacked_state: number, surface: number): boolean;
-
-/**
- * Try to match a magnetic recipe against `(root_def, slot_defs)`.
- * Mirrors the server-side `match_magnetic_recipe` (Phase 2 of the
- * magnetic rewrite). Returns a `StackMatch`-shaped JS object on
- * success or `null` if the predicates don't fit. Throws on
- * registry-build failure or invalid direction.
- *
- * `direction` is `0 = up`, `1 = down`. The client looks up the
- * magnetic card's `magneticRecipeKey` to know the direction (the
- * recipe's `recipe_type` encodes it).
- */
-export function matchMagneticRecipe(root_def: number, slot_defs: Uint16Array, direction: number, root_above: Uint16Array, actor_above: Uint16Array, root_below: Uint16Array, actor_below: Uint16Array): any;
-
-/**
- * Find the best-matching `Stack(direction)` recipe for a chain.
- * `hex_def` is the packed definition of the hex card the chain root is
- * attached to (`0` if not stacked on hex). `root_def` is the loose
- * root's packed definition. `slot_defs` are the packed definitions of
- * cards stacked above (`direction = 0` / "up") or below
- * (`direction = 1` / "down") the root, in chain order.
- *
- * `root_above` / `actor_above` / `root_below` / `actor_below` are the
- * packed definitions of cards stacked on each role's soul card in
- * each direction (UP = equipment / above the soul, DOWN = action
- * stack / below the soul). They feed the `has` / `reagents.has` /
- * `has_below` / `reagents.has_below` feasibility filter: recipes
- * whose has-predicates can't find any matching card in the
- * corresponding pool are skipped before scoring. Pass empty arrays
- * to mean "no equipment / nothing on the soul stack" — recipes
- * that declare has-predicates will then be filtered out, which is
- * the correct behaviour for an unattached player.
- *
- * Unknown packed defs in any pool array are silently skipped (treat
- * the registry as authoritative — a wire-side glitch shouldn't
- * crash matching).
- *
- * Returns a `StackMatch` object on success (with `recipeIndex`,
- * `slotStart`, `slotCount`, `hasRoot`, `hasHex`) or `null` if no
- * recipe matched. Throws on registry-build failure or invalid
- * direction.
- */
-export function matchStackRecipe(hex_def: number, hex_stock0: number, hex_stock1: number, hex_has_stocks: number, root_def: number, slot_defs: Uint16Array, direction: number, root_above: Uint16Array, actor_above: Uint16Array, root_below: Uint16Array, actor_below: Uint16Array): any;
 
 export function miniZoneLayer(): number;
 
@@ -158,6 +102,47 @@ export function packValidAt(time_ms: bigint, sequence: number): bigint;
 export function packZoneDefinition(card_type: number): number;
 
 export function pocketDimensionLayer(): number;
+
+/**
+ * Look up a recipe by its stable `u16` id (the value
+ * `proposeAction` takes as `recipeId`). Returns the full Recipe IR
+ * serialized to JS — `{ id, input[], output[], iterators[], anchors }`
+ * — or `null` if the id isn't registered. Throws on registry-build
+ * failure.
+ *
+ * Used by callers that already have the id (e.g., looking up a
+ * magnetic recipe via a card def's `magnetic.recipe` key resolved
+ * through `findPackedByKey`-style indirection).
+ */
+export function recipeById(id: number): any;
+
+/**
+ * Look up a recipe by its source-key (e.g. `"cut_tree"`,
+ * `"strike_success"`). Returns the full Recipe IR serialized to JS
+ * or `null` if no recipe with that key is registered. Throws on
+ * registry-build failure.
+ *
+ * Used by callers that have a string key in hand — for example, a
+ * card def's `magnetic.recipe` field, or recipe-name lookups in
+ * debug tooling.
+ */
+export function recipeByKey(key: string): any;
+
+/**
+ * Every registered recipe in priority-tiered order (highest priority
+ * first). Each entry is `{ id: u16, recipe: Recipe }` — the `id` is
+ * the stable u16 from `recipes/id.json` (what `proposeAction` takes),
+ * the `recipe` is the parsed IR including `iterators` and `anchors`.
+ *
+ * Priority order is determined by [`crate::recipe_core::AnchorSet`]
+ * — anchor count first, then anchor priority (hex > root > up > down).
+ * The client matcher walks this array in order and stops at the first
+ * tier that yields successful binding(s).
+ *
+ * Returns an empty array when no recipes are registered. Throws on
+ * registry-build failure.
+ */
+export function recipesAll(): any;
 
 /**
  * All starter packs registered for a given soul card key (e.g.
@@ -217,12 +202,9 @@ export interface InitOutput {
     readonly cardTypeId: (a: number, b: number) => [number, number, number];
     readonly decodeDefinition: (a: number) => [number, number, number];
     readonly findPackedByKey: (a: number, b: number) => [number, number, number];
-    readonly findRecipeByKey: (a: number, b: number) => [number, number, number];
     readonly inventoryLayer: () => number;
     readonly isHexType: (a: number) => [number, number, number];
     readonly isStackLayout: (a: number, b: number) => number;
-    readonly matchMagneticRecipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
-    readonly matchStackRecipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => [number, number, number];
     readonly miniZoneLayer: () => number;
     readonly packDefinition: (a: number, b: number) => number;
     readonly packMacroZone: (a: number, b: number) => number;
@@ -232,6 +214,9 @@ export interface InitOutput {
     readonly packValidAt: (a: bigint, b: number) => bigint;
     readonly packZoneDefinition: (a: number) => number;
     readonly pocketDimensionLayer: () => number;
+    readonly recipeById: (a: number) => [number, number, number];
+    readonly recipeByKey: (a: number, b: number) => [number, number, number];
+    readonly recipesAll: () => [number, number, number];
     readonly starterPacksForSoul: (a: number, b: number) => [number, number, number];
     readonly traitValue: (a: number, b: number, c: number) => [number, number, number];
     readonly unpackDefinition: (a: number) => [number, number, number];
