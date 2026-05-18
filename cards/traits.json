@@ -3,7 +3,8 @@
 
   "tile": {
     "_comment": "Traits whose meaning is scoped to tile cards.",
-    "cost": "Movement cost paid to enter the tile. Higher values represent rougher or slower terrain."
+    "cost":   "Movement cost paid to enter the tile. Higher values represent rougher or slower terrain.",
+    "height": "Spatial elevation of the tile — affects lighting, reach, and terrain layering. Per-tile, not summed across a chain."
   },
 
   "soul": {

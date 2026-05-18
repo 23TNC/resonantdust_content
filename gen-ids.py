@@ -83,6 +83,12 @@ def gen_recipe_ids(data_dir: Path, skip_known: bool) -> bool:
     all_ids: dict[str, tuple[str, str]] = {}  # id -> (type, category) for duplicate check
     errors: list[str] = []
 
+    # `on_create` collapses its only category (`self`) to a bare
+    # top-level key. Other single-category-per-type entries would
+    # collapse the same way. Mirrors the Rust outer-key dispatcher in
+    # `content/src/recipe_statement.rs::parse_recipe_type_key`.
+    IMPLICIT_CATEGORY = {"on_create": "self"}
+
     for recipe_file in sorted(defs_dir.rglob("*.json")):
         rel = recipe_file.relative_to(defs_dir).as_posix()
         try:
@@ -90,31 +96,44 @@ def gen_recipe_ids(data_dir: Path, skip_known: bool) -> bool:
         except json.JSONDecodeError as e:
             errors.append(f"{rel}: JSON parse error: {e}")
             continue
-        # Nested shape:
-        #   { "<type>": { "<category>": { "<key>": { ... } } } }
-        # Mirrors the Rust loader. Multiple types per file → multiple
-        # top-level keys.
+        # Flat-key shape:
+        #   { "<type>.<category>": { "<key>": [statement, ...] } }
+        # or, for single-category types:
+        #   { "<type>": { "<key>": [statement, ...] } }
+        # Multiple type-keys per file → multiple top-level keys.
         if not isinstance(root, dict):
-            errors.append(f"{rel}: top-level must be an object keyed by recipe type")
+            errors.append(f"{rel}: top-level must be an object keyed by `<type>` or `<type>.<category>`")
             continue
-        for btype, by_category in root.items():
-            if not isinstance(by_category, dict):
-                errors.append(f"{rel}: type {btype!r}: value not an object")
+        for type_key, recipes_obj in root.items():
+            # Skip JSON-doc convention keys (`_comment`, etc.) — same
+            # tolerance the Rust loader applies for unknown keys.
+            if type_key.startswith("_"):
                 continue
-            for category, recipes_obj in by_category.items():
-                if not isinstance(recipes_obj, dict):
-                    errors.append(f"{rel}: {btype}/{category}: value not an object of recipe keys")
+            parts = type_key.split(".")
+            if len(parts) == 1:
+                btype = parts[0]
+                category = IMPLICIT_CATEGORY.get(btype)
+                if category is None:
+                    errors.append(f"{rel}: top-level key {type_key!r}: missing `.<category>`")
                     continue
-                for rid in recipes_obj:
-                    if rid in all_ids:
-                        prev = all_ids[rid]
-                        errors.append(
-                            f"Duplicate recipe id '{rid}' in {rel}"
-                            f" (first seen under '{prev[0]}/{prev[1]}')"
-                        )
-                    else:
-                        all_ids[rid] = (btype, category)
-                        by_type_cat.setdefault((btype, category), []).append(rid)
+            elif len(parts) == 2:
+                btype, category = parts
+            else:
+                errors.append(f"{rel}: top-level key {type_key!r}: too many `.`-segments")
+                continue
+            if not isinstance(recipes_obj, dict):
+                errors.append(f"{rel}: {type_key}: value not an object of recipe keys")
+                continue
+            for rid in recipes_obj:
+                if rid in all_ids:
+                    prev = all_ids[rid]
+                    errors.append(
+                        f"Duplicate recipe id '{rid}' in {rel}"
+                        f" (first seen under '{prev[0]}/{prev[1]}')"
+                    )
+                else:
+                    all_ids[rid] = (btype, category)
+                    by_type_cat.setdefault((btype, category), []).append(rid)
 
     if errors:
         for e in errors:
@@ -556,17 +575,46 @@ def _collect_paths_at_depth(
         so_far.pop()
 
 
-def _collect_locale_paths(node: dict, so_far: list[str], out: set[str]) -> None:
+def _collect_locale_paths(
+    node: dict,
+    so_far: list[str],
+    out: set[str],
+    warnings: list[str] | None = None,
+) -> None:
     """Walk a locale file and emit a dotted path for every leaf
-    (an object with a `label` field)."""
-    if "label" in node and isinstance(node.get("label"), str):
+    (an object with a `label` field).
+
+    If a node has both a `label` field AND child objects that
+    themselves look like leaves (have their own `label` field), it's
+    a malformed bucket masquerading as a leaf — almost always the
+    result of a botched schema migration. The walker treats it as a
+    bucket (recurses into children) and appends a warning if a
+    `warnings` list is provided, so `sync_locales` can surface the
+    problem to the operator instead of silently corrupting the
+    registry."""
+    has_label = "label" in node and isinstance(node.get("label"), str)
+    child_leaves = [
+        k for k, v in node.items()
+        if isinstance(v, dict) and isinstance(v.get("label"), str)
+    ]
+    if has_label and child_leaves:
+        if warnings is not None:
+            path = ".".join(so_far) or "<root>"
+            warnings.append(
+                f"node {path!r} has both a `label` field "
+                f"({node['label']!r}) AND child leaves "
+                f"({child_leaves}); treating as bucket — remove the "
+                f"stray `label` to clear this warning"
+            )
+        # fall through to the bucket case below
+    elif has_label:
         out.add(".".join(so_far))
         return
     for k, v in node.items():
         if not isinstance(v, dict):
             continue
         so_far.append(k)
-        _collect_locale_paths(v, so_far, out)
+        _collect_locale_paths(v, so_far, out, warnings)
         so_far.pop()
 
 
@@ -651,7 +699,10 @@ def sync_locales(data_dir: Path, verbose: bool = False, purge_orphans: bool = Fa
             root = {}
 
         existing_paths: set[str] = set()
-        _collect_locale_paths(root, [], existing_paths)
+        locale_warnings: list[str] = []
+        _collect_locale_paths(root, [], existing_paths, locale_warnings)
+        for w in locale_warnings:
+            print(f"  WARNING: {domain}/en.json: {w}", file=sys.stderr)
 
         added = 0
         for path_str in sorted(expected_paths):

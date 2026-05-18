@@ -1,21 +1,9 @@
 {
   "soul": {
     "human": {
-      "style": [
-        "#a8e0e6",
-        "#ecd6aa",
-        "#0b1426"
-      ],
-      "aspects": {
-        "mind": 2,
-        "body": 2,
-        "soul": 2,
-        "skill": 1,
-        "order": 1
-      },
-      "traits": {
-        "speed": 12
-      }
+      "style": [ "#a8e0e6", "#ecd6aa", "#0b1426" ],
+      "aspects": { "soul": 2 },
+      "traits": { "speed": 12 }
     }
   }
 }

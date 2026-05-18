@@ -35,7 +35,9 @@
 
 pub mod packed;
 pub mod definition_core;
+pub mod biome_core;
 pub mod recipe_core;
+pub mod recipe_statement;
 pub mod starter_pack_core;
 pub mod texture_core;
 pub mod flags_core;

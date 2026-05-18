@@ -1,28 +1,31 @@
 // Pack/unpack helpers for the bit-packed columns on the cards table.
+// Single source of truth — the spacetime shard / chat modules
+// re-export this module verbatim via `pub use
+// resonantdust_content::packed::*;`.
 //
 // Layouts:
-//   valid_at         u64 = [card_id: u32 | time_secs: u32]                  (high | low)
+//   valid_at         u64 = [time_ms: u48 | sequence: u16]                   (high | low)
+//                          — see `pack_valid_at` below and `sequence.rs`
+//                          for how the u16 disambiguator is allocated.
 //   macro_zone       u32 = [q: i16 | r: i16]                                (high | low)
 //   micro_zone       u8  — TWO INTERPRETATIONS, gated by (stacked_state, surface):
-//     stack layout — state == OnRoot AND surface < 64:
+//     stack layout — state == OnRoot AND surface < WORLD_LAYER:
 //                   u8 = [position: u5 | direction: u1 | stacked_state: u2]
-//     legacy layout — every other case (Free / ReservedSlot / OnHex / world):
+//     legacy layout — every other case (Free / Slot / OnHex / world):
 //                   u8 = [q: u3 | r: u3 | stacked_state: u2]
 //   micro_location   u32 — interpretation depends on stacked_state:
 //     Free          → [x: i16 | y: i16] (loose XY in surface-local coords)
-//     ReservedSlot  → RESERVED for an upcoming slot-pinning mode where
-//                     micro_location will hold the immediate parent's
-//                     card_id (not the root). Unused today.
+//     Slot          → immediate parent's card_id (chain walks up via this).
 //     OnRoot        → ROOT card_id of the rect chain (chain order /
 //                     direction from `micro_zone.position` and
-//                     `micro_zone.direction`)
+//                     `micro_zone.direction`).
 //     OnHex         → parent hex card_id (walk up via `micro_location`
-//                     to find root hex; hex chains aren't migrated)
+//                     to find root hex; hex chains aren't migrated).
 //   packed_def       u16 = [card_type: u4 | def_id: u12]
 //   zone_def         u8  = [card_type: u4 | 0: u4] (lower nibble reserved)
-//   tile row         u64 = 8 little-endian u8 def_ids (byte i = column i)
-//                       (widened to u12 per tile under the lifecycle/zone
-//                        rewrite, Phase 2 — see docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md)
+//   tile slot        u16 = [def_id: u12 | stock0: u2 | stock1: u2]
+//                          packed 4-per-u64 across 16 u64s per zone — see
+//                          docs/TILE_ASPECTS.md.
 //   recipe           u16 = [recipe_type: u3 | recipe_category: u3 | recipe_id: u10]
 //
 // Rect chains (state = OnRoot) use the (root_id, position, direction)
@@ -76,10 +79,57 @@ impl StackedState {
     }
 }
 
-// ---- valid_at ----------------------------------------------------------
+// ---- surface bands ------------------------------------------------------
+//
+// `Card.surface` and `Zone.surface` are u8, but the values are
+// banded into ranges with different semantics. Every band is a
+// "container kind" — the `(surface, macro_zone)` tuple identifies
+// which container a row belongs to. `macro_zone` means different
+// things in different bands:
+//
+// - INVENTORY_LAYER (1):           `macro_zone` = the owning soul's
+//                                  `card_id`. The player's hand /
+//                                  bag / inventory grid.
+// - POCKET_DIMENSION_LAYER (32):   `macro_zone` = the anchor card's
+//                                  `card_id`. A private interior
+//                                  carried by an anchor card.
+// - MINI_ZONE_LAYER (63):          `macro_zone` = the anchor card's
+//                                  `card_id`. A radius-3 hex disk
+//                                  overlaying the world wherever
+//                                  the anchor is placed. The anchor
+//                                  itself lives at WORLD_LAYER.
+// - WORLD_LAYER (64) and above:    `macro_zone` = packed
+//                                  `(chunkQ:i16, chunkR:i16)`. The
+//                                  shared world hex grid.
+//
+// The split at `< WORLD_LAYER` is what existing code keys "stack
+// layout" rules and inventory-like behavior off. The split at
+// `>= WORLD_LAYER` is what world-vs-personal queries key off. The
+// MINI_ZONE_LAYER sits just below WORLD_LAYER intentionally: stack-
+// layout rules apply (cards on mini_zone tiles can chain with the
+// existing rect-stack machinery), and world-only queries continue
+// to skip mini_zone contents.
+pub const INVENTORY_LAYER: u8 = 1;
+pub const POCKET_DIMENSION_LAYER: u8 = 32;
+pub const MINI_ZONE_LAYER: u8 = 63;
+pub const WORLD_LAYER: u8 = 64;
 
-// PK layout: `(time_ms_u48 << 16) | sequence_u16`. See the
-// server-side packed.rs for the full rationale.
+// ---- valid_at ----------------------------------------------------------
+//
+// PK layout: `(time_ms_u48 << 16) | sequence_u16`.
+//
+// - High 48 bits: milliseconds since Unix epoch. u48 ms ≈ 8920 years
+//   of runway from epoch (covers our lifetime trivially). PK ordering
+//   is chronological — a btree scan walks rows in time order, useful
+//   for any range queries that need it (though most callers go via
+//   `card_id` btree index, where the explicit `max_by_key` ordering
+//   is what's load-bearing).
+// - Low 16 bits: global sequence number from `sequence::next_sequence`,
+//   refreshed per write. Disambiguates two writes that share a
+//   millisecond — within one module, even thousands of same-ms writes
+//   sit far below the 65k wrap budget. Cross-shard collisions don't
+//   exist because shards' PK spaces don't overlap (each shard owns
+//   its own rows entirely).
 
 pub fn pack_valid_at(time_ms: u64, sequence: u16) -> u64 {
     (time_ms << 16) | (sequence as u64)
@@ -130,7 +180,7 @@ pub fn micro_zone_state(v: u8) -> StackedState {
 /// writes; share `unpack_stack_micro_zone` for reads since the bit
 /// layout is identical.
 pub fn is_stack_layout(state: StackedState, surface: u8) -> bool {
-    surface < 64 && matches!(state, StackedState::OnRoot)
+    surface < WORLD_LAYER && matches!(state, StackedState::OnRoot)
 }
 
 /// Direction bit values within the stack layout. `0 = up / top`,
@@ -271,92 +321,129 @@ pub fn unpack_recipe(v: u16) -> (u8, u8, u16) {
     )
 }
 
-// ---- zone tile storage (12 u64 holding 64 u12 def_ids) ---------------
+// ---- zone tile storage (16 u64 holding 64 u16 tile slots) ------------
 //
-// Each zone has 64 tiles (8 × 8 grid). With u12 per tile, that's
-// 768 bits = 12 u64s. Tiles are packed left-to-right, little-endian
-// within each u64; tile `i`'s bits live at positions `12*i ..
-// 12*i + 11` across the flat array of u64s. Some tiles straddle u64
-// boundaries (those whose `start_bit % 64 + 12 > 64`); the helpers
-// below transparently span both u64s for those.
+// Each zone has 64 tiles (8 × 8 grid). Each tile slot is u16 wide:
 //
-// See docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md for why u12 was the
-// chosen width.
+//     [ def_id:u12 | stock0:u2 | stock1:u2 ]
+//
+//   - `def_id` (low 12 bits): the tile's `CardDefinition` packed_id
+//     payload — same value the per-card `packed_definition` carries.
+//   - `stock0` / `stock1` (bits 12-13, 14-15): u2 values for the
+//     def's declared row-mutable aspect slots (see
+//     `CardDefinition.stock`). The def maps slot index → aspect.
+//
+// 64 tiles × 16 bits = 1024 bits = exactly 16 u64. 8 tiles per row =
+// 128 bits = 2 u64 per row, no boundary straddling — unlike the u12
+// layout this replaces. See docs/TILE_ASPECTS.md.
 
 /// Number of u64 fields in the zone tile-data packing.
-pub const ZONE_TILE_U64_COUNT: usize = 12;
+pub const ZONE_TILE_U64_COUNT: usize = 16;
 
 /// Number of tiles per zone (8 × 8 grid).
 pub const ZONE_TILE_COUNT: usize = 64;
 
-/// Bit width of a single tile's def_id.
-pub const ZONE_TILE_BITS: usize = 12;
+/// Bit width of a single tile slot (def_id + two stocks).
+pub const ZONE_TILE_BITS: usize = 16;
 
-/// Max def_id storable in a tile slot. Matches `DEF_ID_MAX`.
-pub const ZONE_TILE_MAX: u16 = DEF_ID_MAX;
+/// Number of stock slots per tile. Matches `MAX_STOCK_SLOTS` on the
+/// def side. Slot 0 lives at bits 12-13, slot 1 at bits 14-15.
+pub const ZONE_TILE_STOCK_SLOTS: usize = 2;
 
-/// Read tile `idx` (0..64) from the packed array. Returns the u12
-/// def_id; `0` means empty / no tile.
-pub fn tile_at(packed: &[u64; ZONE_TILE_U64_COUNT], idx: usize) -> u16 {
+/// Max value a stock slot can store (u2).
+pub const ZONE_TILE_STOCK_MAX: u8 = 0x3;
+
+/// Bit mask isolating one tile's u16 within its u64 (after shifting
+/// to the tile's bit offset).
+const TILE_MASK: u64 = 0xFFFF;
+
+/// Read tile `idx` (0..64) — returns `(def_id, stock0, stock1)`.
+pub fn tile_full(packed: &[u64; ZONE_TILE_U64_COUNT], idx: usize) -> (u16, u8, u8) {
     debug_assert!(idx < ZONE_TILE_COUNT, "tile index {} out of range", idx);
-    let start_bit = ZONE_TILE_BITS * idx;
-    let u64_idx = start_bit / 64;
-    let bit_offset = start_bit % 64;
-    if bit_offset + ZONE_TILE_BITS <= 64 {
-        // Tile fits entirely inside one u64.
-        ((packed[u64_idx] >> bit_offset) & 0xFFF) as u16
-    } else {
-        // Tile straddles two u64s. The low_bits live in
-        // `packed[u64_idx]`'s high bits; the rest live in
-        // `packed[u64_idx + 1]`'s low bits.
-        let low_bits = 64 - bit_offset;
-        let high_bits = ZONE_TILE_BITS - low_bits;
-        let low = (packed[u64_idx] >> bit_offset) & ((1u64 << low_bits) - 1);
-        let high = packed[u64_idx + 1] & ((1u64 << high_bits) - 1);
-        ((high << low_bits) | low) as u16
-    }
+    let u64_idx = idx / 4; // 4 tiles per u64
+    let bit_offset = (idx % 4) * 16;
+    let slot = (packed[u64_idx] >> bit_offset) & TILE_MASK;
+    let def_id = (slot & 0x0FFF) as u16;
+    let stock0 = ((slot >> 12) & 0x3) as u8;
+    let stock1 = ((slot >> 14) & 0x3) as u8;
+    (def_id, stock0, stock1)
 }
 
-/// Write tile `idx` (0..64) to the packed array. Excess bits in
-/// `def_id` above the u12 range are masked off.
-pub fn set_tile(packed: &mut [u64; ZONE_TILE_U64_COUNT], idx: usize, def_id: u16) {
+/// Read just the def_id (low 12 bits) of tile `idx`.
+pub fn tile_def_id(packed: &[u64; ZONE_TILE_U64_COUNT], idx: usize) -> u16 {
     debug_assert!(idx < ZONE_TILE_COUNT, "tile index {} out of range", idx);
-    let def_id = (def_id as u64) & 0xFFF;
-    let start_bit = ZONE_TILE_BITS * idx;
-    let u64_idx = start_bit / 64;
-    let bit_offset = start_bit % 64;
-    if bit_offset + ZONE_TILE_BITS <= 64 {
-        let mask: u64 = 0xFFF << bit_offset;
-        packed[u64_idx] = (packed[u64_idx] & !mask) | (def_id << bit_offset);
-    } else {
-        let low_bits = 64 - bit_offset;
-        let high_bits = ZONE_TILE_BITS - low_bits;
-        let low_mask = ((1u64 << low_bits) - 1) << bit_offset;
-        let high_mask = (1u64 << high_bits) - 1;
-        let low = def_id & ((1u64 << low_bits) - 1);
-        let high = def_id >> low_bits;
-        packed[u64_idx] = (packed[u64_idx] & !low_mask) | (low << bit_offset);
-        packed[u64_idx + 1] = (packed[u64_idx + 1] & !high_mask) | high;
-    }
+    let u64_idx = idx / 4;
+    let bit_offset = (idx % 4) * 16;
+    ((packed[u64_idx] >> bit_offset) & 0x0FFF) as u16
 }
 
-/// Decode one row of 8 tiles from the packed array. Convenience
-/// wrapper around `tile_at`. `row` is 0..=7; tiles are laid out
-/// row-major (row * 8 + col).
-pub fn tile_row(packed: &[u64; ZONE_TILE_U64_COUNT], row: usize) -> [u16; 8] {
-    let mut out = [0u16; 8];
+/// Read tile `idx`'s stock slot `slot` (0 or 1). Returns 0..=3.
+pub fn tile_stock(packed: &[u64; ZONE_TILE_U64_COUNT], idx: usize, slot: usize) -> u8 {
+    debug_assert!(idx < ZONE_TILE_COUNT, "tile index {} out of range", idx);
+    debug_assert!(slot < ZONE_TILE_STOCK_SLOTS, "stock slot {} out of range", slot);
+    let u64_idx = idx / 4;
+    let bit_offset = (idx % 4) * 16 + 12 + (slot * 2);
+    ((packed[u64_idx] >> bit_offset) & 0x3) as u8
+}
+
+/// Write tile `idx`'s full u16 slot. Each field is masked to its
+/// declared width — excess bits are silently dropped, not panicked
+/// on.
+pub fn set_tile_full(
+    packed: &mut [u64; ZONE_TILE_U64_COUNT],
+    idx: usize,
+    def_id: u16,
+    stock0: u8,
+    stock1: u8,
+) {
+    debug_assert!(idx < ZONE_TILE_COUNT, "tile index {} out of range", idx);
+    let u64_idx = idx / 4;
+    let bit_offset = (idx % 4) * 16;
+    let mask = TILE_MASK << bit_offset;
+    let value = (def_id as u64 & 0x0FFF)
+        | ((stock0 as u64 & 0x3) << 12)
+        | ((stock1 as u64 & 0x3) << 14);
+    packed[u64_idx] = (packed[u64_idx] & !mask) | (value << bit_offset);
+}
+
+/// Write a single stock slot on tile `idx`. Other bits in the u16
+/// slot (the def_id and the other stock) are left untouched.
+pub fn set_tile_stock(
+    packed: &mut [u64; ZONE_TILE_U64_COUNT],
+    idx: usize,
+    slot: usize,
+    value: u8,
+) {
+    debug_assert!(idx < ZONE_TILE_COUNT, "tile index {} out of range", idx);
+    debug_assert!(slot < ZONE_TILE_STOCK_SLOTS, "stock slot {} out of range", slot);
+    let u64_idx = idx / 4;
+    let bit_offset = (idx % 4) * 16 + 12 + (slot * 2);
+    let mask = 0x3u64 << bit_offset;
+    let v = (value as u64 & 0x3) << bit_offset;
+    packed[u64_idx] = (packed[u64_idx] & !mask) | v;
+}
+
+/// Decode one row of 8 tiles. Returns `(def_id, stock0, stock1)` per
+/// column, row-major (row 0 = tile indices 0..=7, row 1 = 8..=15,
+/// etc.).
+pub fn tile_row(packed: &[u64; ZONE_TILE_U64_COUNT], row: usize) -> [(u16, u8, u8); 8] {
+    let mut out = [(0u16, 0u8, 0u8); 8];
     let base = row * 8;
     for col in 0..8 {
-        out[col] = tile_at(packed, base + col);
+        out[col] = tile_full(packed, base + col);
     }
     out
 }
 
-/// Write one row of 8 tiles.
-pub fn set_tile_row(packed: &mut [u64; ZONE_TILE_U64_COUNT], row: usize, tiles: &[u16; 8]) {
+pub fn set_tile_row(
+    packed: &mut [u64; ZONE_TILE_U64_COUNT],
+    row: usize,
+    slots: &[(u16, u8, u8); 8],
+) {
+    debug_assert!(row < 8, "row {} out of range", row);
     let base = row * 8;
-    for col in 0..8 {
-        set_tile(packed, base + col, tiles[col]);
+    for (col, (def_id, stock0, stock1)) in slots.iter().enumerate() {
+        set_tile_full(packed, base + col, *def_id, *stock0, *stock1);
     }
 }
 
@@ -467,62 +554,95 @@ mod tests {
     }
 
     #[test]
-    fn tile_at_set_roundtrip() {
+    fn tile_full_roundtrip() {
         let mut packed = [0u64; ZONE_TILE_U64_COUNT];
         // Read-empty: every slot zero.
         for i in 0..ZONE_TILE_COUNT {
-            assert_eq!(tile_at(&packed, i), 0);
+            assert_eq!(tile_full(&packed, i), (0, 0, 0));
         }
-        // Write each slot to a distinct value and read it back.
+        // Write each tile to a distinct (def_id, stock0, stock1) and
+        // read it back. Defs use the full u12; stocks cycle through
+        // 0..=3 so we exercise all u2 values.
         for i in 0..ZONE_TILE_COUNT {
-            set_tile(&mut packed, i, (i + 1) as u16);
+            set_tile_full(
+                &mut packed,
+                i,
+                (i + 1) as u16,
+                (i % 4) as u8,
+                ((i + 1) % 4) as u8,
+            );
         }
         for i in 0..ZONE_TILE_COUNT {
-            assert_eq!(tile_at(&packed, i), (i + 1) as u16);
+            assert_eq!(
+                tile_full(&packed, i),
+                ((i + 1) as u16, (i % 4) as u8, ((i + 1) % 4) as u8),
+            );
         }
     }
 
     #[test]
-    fn tile_set_max_def_id() {
+    fn tile_field_masking() {
+        // Each field is masked to its declared width; excess bits
+        // are silently dropped, not panicked on. Confirms the high
+        // bits don't bleed into neighbour fields.
         let mut packed = [0u64; ZONE_TILE_U64_COUNT];
-        set_tile(&mut packed, 0, ZONE_TILE_MAX);
-        assert_eq!(tile_at(&packed, 0), ZONE_TILE_MAX);
-        set_tile(&mut packed, 63, ZONE_TILE_MAX);
-        assert_eq!(tile_at(&packed, 63), ZONE_TILE_MAX);
-        // Excess bits get masked off.
-        set_tile(&mut packed, 5, 0x1FFF);
-        assert_eq!(tile_at(&packed, 5), 0xFFF);
+        // def_id u12 — 0xFFFF gets masked to 0xFFF.
+        set_tile_full(&mut packed, 0, 0xFFFF, 0, 0);
+        assert_eq!(tile_full(&packed, 0), (0xFFF, 0, 0));
+        // stock u2 — 0xFF gets masked to 0x3.
+        set_tile_full(&mut packed, 0, 0, 0xFF, 0xFF);
+        assert_eq!(tile_full(&packed, 0), (0, 3, 3));
+        // Neighbours stay zero across all the masking.
+        assert_eq!(tile_full(&packed, 1), (0, 0, 0));
     }
 
     #[test]
-    fn tile_straddle_boundaries() {
-        // Tiles 5, 10, 16, 21, ... straddle u64 boundaries. Exercise
-        // both sides of those boundaries to confirm the high/low
-        // split is correct.
+    fn tile_stock_isolated_writes() {
+        // `set_tile_stock` mutates one stock without touching the
+        // def or the other stock.
         let mut packed = [0u64; ZONE_TILE_U64_COUNT];
-        for &idx in &[4, 5, 6, 10, 16, 21, 53, 58, 63] {
-            set_tile(&mut packed, idx, 0xABC);
+        set_tile_full(&mut packed, 7, 0xABC, 1, 2);
+        set_tile_stock(&mut packed, 7, 0, 3);
+        assert_eq!(tile_full(&packed, 7), (0xABC, 3, 2));
+        set_tile_stock(&mut packed, 7, 1, 0);
+        assert_eq!(tile_full(&packed, 7), (0xABC, 3, 0));
+        // tile_stock reads the same value
+        assert_eq!(tile_stock(&packed, 7, 0), 3);
+        assert_eq!(tile_stock(&packed, 7, 1), 0);
+    }
+
+    #[test]
+    fn tile_neighbour_independence() {
+        // 4 tiles share a u64. Writing one tile must not corrupt
+        // the other three. Pin tile 5's bits in the middle of u64[1]
+        // (which holds tiles 4..=7) and confirm the surrounding
+        // tiles stay zero, then mutate tile 5's stock and confirm
+        // 4 / 6 / 7 still report zero.
+        let mut packed = [0u64; ZONE_TILE_U64_COUNT];
+        set_tile_full(&mut packed, 5, 0xABC, 2, 1);
+        for &idx in &[0, 4, 6, 7, 8, 63] {
+            assert_eq!(tile_full(&packed, idx), (0, 0, 0));
         }
-        // Neighbors stay zero.
-        for &idx in &[3, 7, 9, 11, 22] {
-            assert_eq!(tile_at(&packed, idx), 0);
+        set_tile_stock(&mut packed, 5, 0, 0);
+        for &idx in &[0, 4, 6, 7, 8, 63] {
+            assert_eq!(tile_full(&packed, idx), (0, 0, 0));
         }
-        // Set values round-trip.
-        for &idx in &[4, 5, 6, 10, 16, 21, 53, 58, 63] {
-            assert_eq!(tile_at(&packed, idx), 0xABC);
-        }
+        // tile 5 retained its def + slot 1 stock.
+        assert_eq!(tile_full(&packed, 5), (0xABC, 0, 1));
     }
 
     #[test]
     fn tile_row_decode() {
         let mut packed = [0u64; ZONE_TILE_U64_COUNT];
         for col in 0..8 {
-            set_tile(&mut packed, col, 100 + col as u16);
+            set_tile_full(&mut packed, col, 100 + col as u16, 1, 2);
         }
         let row0 = tile_row(&packed, 0);
-        assert_eq!(row0, [100, 101, 102, 103, 104, 105, 106, 107]);
-        // Row 1 is still zero.
+        for (col, entry) in row0.iter().enumerate() {
+            assert_eq!(*entry, (100 + col as u16, 1, 2));
+        }
+        // Row 1 is still empty.
         let row1 = tile_row(&packed, 1);
-        assert_eq!(row1, [0; 8]);
+        assert_eq!(row1, [(0, 0, 0); 8]);
     }
 }

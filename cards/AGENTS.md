@@ -53,12 +53,13 @@ the registry; a typo just won't produce a decodable card.
 | Field | Required | Notes |
 | --- | --- | --- |
 | `style` | yes | `[string, string, string]` — three CSS hex colors (`#RRGGBB`, lowercase or uppercase, exactly 6 hex digits). Validated at registry build; invalid hex produces a stored registry error. Used by the renderer; the server doesn't otherwise interpret them. |
-| `aspects` | no | Map `aspect_name → i32 value`. Every name must be declared in [`aspects.json`](aspects.json) — unknown aspects are a hard build error. Default `{}`. |
+| `aspects` | no | Map `aspect_name → i32 value`. Every name must be declared in [`aspects.json`](aspects.json) — unknown aspects are a hard build error. Default `{}`. Static — every card row carrying this def sees the same numbers. |
 | `traits` | no | Map `trait_name → number`. Every name must be declared in [`traits.json`](traits.json) — unknown traits are a hard build error. Values are parsed as `f64` and stored as `f32` (so `1`, `1.0`, and `1.2` all round-trip cleanly). Default `{}`. |
+| `stock` | no | Array of row-mutable aspect slots — same aspect namespace, but values live on the row (tile bits) instead of the def. Each entry `{ "aspect": <name>, "max": 1..=3, "default": 0..=max }`. Cap of 2 slots per def. Tile-only in v1. See [Stock slots](#stock-slots) below and [docs/TILE_ASPECTS.md](../../docs/TILE_ASPECTS.md). |
 
 The spec object must be present even if empty (just `{}`), but
-`aspects` / `traits` can be omitted entirely — most cards declare
-neither.
+`aspects` / `traits` / `stock` can be omitted entirely — most cards
+declare none of them.
 
 There is **no `name` / `display_name` field** in the card JSON. Display
 labels are resolved at runtime via the locale registry — see
@@ -77,6 +78,50 @@ labels are resolved at runtime via the locale registry — see
 
 If in doubt: does it make sense to add two cards' values together?
 Aspect. If not: trait.
+
+### Stock slots
+
+`stock` declares **row-mutable aspect values** for tile defs — same
+aspect namespace as `aspects`, but the actual value lives on the
+zone tile's u2 bits rather than baked into the def. A forest tile
+def declares `{ "aspect": "wood", "max": 3, "default": 2 }` and
+every forest-tile *row* carries its own current wood value 0..=3
+that recipes can decrement.
+
+```json
+"forest_1": {
+  "style": [...],
+  "stock": [
+    { "aspect": "wood",  "max": 3, "default": 2 },
+    { "aspect": "stone", "max": 1, "default": 0 }
+  ]
+}
+```
+
+Per-slot fields:
+
+| Field | Notes |
+| --- | --- |
+| `aspect` | Name from [`aspects.json`](aspects.json). Unknown → hard build error. |
+| `max` | Cap on the row value. `1..=3` (u2 storage). A def using a slot as a boolean sets `max: 1`. |
+| `default` | Initial value worldgen / spawn paths seed the slot with. `0..=max`. |
+
+**Order matters.** Array index 0 maps to the per-tile `stock0` bits,
+index 1 maps to `stock1`. Reordering the array is a data-breaking
+change — every existing tile row would see its values swapped. Cap
+of 2 slots per def (the per-tile u16 has `u4` reserved for stock).
+
+**Same aspect can appear in both `aspects` and `stock`.** The
+matcher prefers the row's stock value when evaluating
+`{"aspect": <name>, "min": N}` against a tile that declares this
+aspect in `stock`; the def's static `aspects` value falls back for
+non-tile contexts (texture lookups, defs without a matching stock
+slot). See [docs/TILE_ASPECTS.md] §"Stock vs static-aspect priority"
+for the precedence rules.
+
+Recipes consume stock via the `consume.hex.aspect.<name>: N` field
+— see [content/recipes/AGENTS.md](../recipes/AGENTS.md) for the
+recipe-side shape.
 
 ## cards/types.json
 

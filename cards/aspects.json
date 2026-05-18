@@ -1,63 +1,41 @@
 {
-  "_comment": "Aspect catalog — tags placed on cards to describe function. Used in recipe entity strings alongside card definition ids.",
+  "_comment": "Aspect catalog — tags placed on cards (static `aspects`) or row-mutable tile stock (`stock`) to describe function. Flat top-level: each entry is a top-level aspect. Sub-aspects are NESTED inside their parent's object; parent relationship is implicit in the JSON tree. Sub-aspects inherit their parent's `icon` AND `color` if they omit them. The recipe matcher (when widened) treats sub-aspects as satisfying their ancestors — a tile carrying `berries` satisfies `{aspect: food, min: 1}`. Storage and `output.modify` consumption stay concrete (slot is declared by leaf name; consume by the same).",
 
-  "resources": {
-    "_comment": "Raw and processed materials",
-    "labor":  { "icon": "⚒", "description": "Work or effort applied to a task" },
-    "flora":  { "icon": "🌿", "description": "Living plant matter — trees, bushes, undergrowth" },
-    "wood":   { "icon": "🪵", "description": "Timber — logs, branches, raw lumber" },
-    "stone":  { "icon": "🪨", "description": "Rock, ore, mineral material" },
-    "metal":  { "icon": "🔩", "description": "Processed or smelted metallic material" },
-    "food":   { "icon": "🌾", "description": "Sustenance, edible produce" },
-    "fuel":   { "icon": "🕯", "description": "Combustible energy source (wood, coal, oil, etc.)" }
+  "wood": {
+    "icon": "🪵", "color": "#6B4423", "description": "Timber — logs, branches, raw lumber",
+    "pine": { "description": "Pine — fast-growing softwood" }
   },
 
-  "elements": {
-    "_comment": "Classical elemental forces",
-    "earth": { "icon": "⛰", "description": "Stability, physicality, growth" },
-    "water": { "icon": "💧", "description": "Flow, change, nourishment" },
-    "fire":  { "icon": "🔥", "description": "Energy, destruction, transformation" },
-    "wind":  { "icon": "💨", "description": "Speed, freedom, breath" },
-    "light": { "icon": "☀", "description": "Illumination, order, clarity" },
-    "dark":  { "icon": "🌑", "description": "Shadow, entropy, concealment" }
+  "stone": { "icon": "🪨", "color": "#808080", "description": "Rock, ore, mineral material" },
+
+  "metal": { "icon": "⬛", "color": "#A0A0A0", "description": "Processed or smelted metallic material" },
+
+  "food": {
+    "icon": "🌾", "color": "#CCAA22", "description": "Sustenance, edible produce",
+    "berry": { "description": "" }
   },
 
-  "alignment": {
-    "_comment": "Moral or cosmic orientation",
-    "order": { "icon": "⚖", "description": "Structure, law, discipline" },
-    "chaos": { "icon": "🌀", "description": "Randomness, freedom, disruption" }
+  "flora": {
+    "icon": "🌿", "color": "#4A8B3E", "description": "Living plant matter — trees, bushes, undergrowth",
+    "brush": { "description": "Brush — tangled undergrowth" }
   },
 
-  "faculties": {
-    "_comment": "The four inner faculties — mirror the faculty card ids",
-    "corpus":    { "icon": "💪", "description": "The body — physical capacity and health" },
-    "sollertia": { "icon": "🧠", "description": "Skill and cleverness — trained capability" },
-    "anima":     { "icon": "✨", "description": "The animating soul — will and spirit" },
-    "aether":    { "icon": "🔮", "description": "Subtle or magical essence" }
+  "fire": {
+    "icon": "🔥", "color": "#CC3311", "description": "Combustible energy source",
+    "fuel": { "description": "" }
   },
 
-  "dimensions": {
-    "_comment": "Abstract axes a card may contribute to — spatial, physical, or metaphysical",
-    "mind":   { "icon": "💡", "description": "Intellectual or cognitive contribution" },
-    "body":   { "icon": "🏃", "description": "Physical or somatic contribution" },
-    "skill":  { "icon": "🎯", "description": "Trained or practiced contribution" },
-    "soul":   { "icon": "🕊", "description": "Spiritual or willful contribution" },
-    "height": { "icon": "△", "description": "Spatial elevation — affects lighting, reach, and terrain layering" }
+  "water": { "icon": "💧", "color": "#1E6B9E", "description": "Fresh water — drinking, irrigation, flow" },
+
+  "corpus": {
+    "icon": "💪", "color": "#B04848", "description": "The body — physical capacity and health",
+    "corpus--": { "description": "Injuries — wounds, broken bones, lasting harm" },
+    "corpus-":  { "description": "Fatigue — exhaustion, transient depletion" },
+    "corpus+":  { "description": "Standard corpus — baseline vitality" },
+    "corpus++": { "description": "Enhanced corpus — vigor, heightened resilience" }
   },
 
-  "activities": {
-    "_comment": "Action domains and craft categories",
-    "combat":  { "icon": "⚔", "description": "Fighting, violence, warfare" },
-    "defence": { "icon": "🛡", "description": "Protection, fortification, resilience" },
-    "craft":   { "icon": "🔨", "description": "Making, building, fabrication" },
-    "explore": { "icon": "🧭", "description": "Discovery, movement, scouting" },
-    "quality": { "icon": "💎", "description": "Refinement, excellence, purity" }
-  },
+  "soul": { "icon": "♙", "color": "#4455AA", "description": "Spiritual or willful contribution" },
 
-  "states": {
-    "_comment": "Transient or persistent card states",
-    "fleeting": { "icon": "⌛", "description": "Temporary — expires after a duration" },
-    "memory":   { "icon": "📜", "description": "Retained knowledge or experience" }
-  }
-
+  "fleeting": { "icon": "⌛", "color": "#556677", "description": "Temporary — expires after a duration" }
 }

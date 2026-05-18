@@ -1,18 +1,11 @@
 {
   "requisite": {
     "axe": {
-      "style": [
-        "#8B5E3C",
-        "#ecd6aa",
-        "#0b1426"
-      ]
+      "style": [ "#8B5E3C", "#ecd6aa", "#0b1426" ],
+      "sprite": "128_requisite_8"
     },
     "pickaxe": {
-      "style": [
-        "#8A857C",
-        "#ecd6aa",
-        "#0b1426"
-      ]
+      "style": [ "#8A857C", "#ecd6aa", "#0b1426" ]
     }
   }
 }

@@ -13,8 +13,7 @@
   },
   "stack": {
     "down": {
-      "corpus_down_aspect": 1,
-      "corpus_down": 2
+      "corpus_down": 1
     },
     "up": {
       "triple_corpus": 1,

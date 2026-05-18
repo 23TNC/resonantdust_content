@@ -188,6 +188,9 @@ pub fn trait_value(packed_def: u16, name: &str) -> Result<Option<f32>, JsValue> 
 #[wasm_bindgen(js_name = matchStackRecipe)]
 pub fn match_stack_recipe(
   hex_def: u16,
+  hex_stock0: u8,
+  hex_stock1: u8,
+  hex_has_stocks: u8,
   root_def: u16,
   slot_defs: Vec<u16>,
   direction: u8,
@@ -206,6 +209,16 @@ pub fn match_stack_recipe(
       )));
     }
   };
+  // `hex_has_stocks` is a 0/1 sentinel — `Option<(u8, u8)>` doesn't
+  // round-trip through `wasm_bindgen` directly. Caller passes `0`
+  // when the hex came from a Card row (no per-row stock; matcher
+  // falls back to static aspects) and `1` when the hex came from a
+  // synthetic tile slot (`stock0` / `stock1` are the per-tile u2s).
+  let hex_stocks = if hex_has_stocks != 0 {
+    Some((hex_stock0, hex_stock1))
+  } else {
+    None
+  };
   let root_above_defs = decode_def_pool(&root_above)?;
   let actor_above_defs = decode_def_pool(&actor_above)?;
   let root_below_defs = decode_def_pool(&root_below)?;
@@ -218,6 +231,7 @@ pub fn match_stack_recipe(
   };
   let opt = core_match_stack_recipe_detail(
     hex_def,
+    hex_stocks,
     root_def,
     &slot_defs,
     dir,
@@ -392,4 +406,170 @@ pub fn starter_packs_for_soul(soul: &str) -> Result<JsValue, JsValue> {
 pub fn all_textures() -> Result<JsValue, JsValue> {
   let txs = core_textures().map_err(|e| JsValue::from_str(&e))?;
   serde_wasm_bindgen::to_value(&txs).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+// ---- Bit-packing helpers ------------------------------------------------
+//
+// Same definitions the server uses — both shard and chat re-export
+// `resonantdust_content::packed` so changes to the bit layouts here
+// propagate to the whole stack. The client today has native TS
+// implementations in `pixijs/src/server/data/packing.ts` for hot-path
+// reasons (called per zone decode / card sync); the wasm exports
+// below let cold paths or test fixtures call into the canonical
+// implementation when wasm-crossing overhead doesn't matter.
+//
+// Result struct shapes are flat objects (`{ q, r }`, `{ cardType,
+// defId }`, etc.) keyed by camelCase fields, matching the rest of
+// the wasm API's serialisation discipline. Numbers use plain `u32`
+// where the bit layout fits; `u64` (valid_at) maps to JS BigInt
+// automatically via wasm-bindgen.
+
+use crate::packed as core_packed;
+
+#[wasm_bindgen(js_name = packValidAt)]
+pub fn pack_valid_at(time_ms: u64, sequence: u16) -> u64 {
+  core_packed::pack_valid_at(time_ms, sequence)
+}
+
+#[wasm_bindgen(js_name = validAtTime)]
+pub fn valid_at_time(packed: u64) -> u64 {
+  core_packed::valid_at_time(packed)
+}
+
+#[wasm_bindgen(js_name = packMacroZone)]
+pub fn pack_macro_zone(q: i16, r: i16) -> u32 {
+  core_packed::pack_macro_zone(q, r)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MacroZoneUnpacked {
+  q: i16,
+  r: i16,
+}
+
+#[wasm_bindgen(js_name = unpackMacroZone)]
+pub fn unpack_macro_zone(v: u32) -> Result<JsValue, JsValue> {
+  let (q, r) = core_packed::unpack_macro_zone(v);
+  serde_wasm_bindgen::to_value(&MacroZoneUnpacked { q, r })
+    .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = packMicroZone)]
+pub fn pack_micro_zone(q: u8, r: u8, stacked_state: u8) -> u8 {
+  core_packed::pack_micro_zone(q, r, core_packed::StackedState::from_u2(stacked_state))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MicroZoneUnpacked {
+  q: u8,
+  r: u8,
+  stacked_state: u8,
+}
+
+#[wasm_bindgen(js_name = unpackMicroZone)]
+pub fn unpack_micro_zone(v: u8) -> Result<JsValue, JsValue> {
+  let (q, r, state) = core_packed::unpack_micro_zone(v);
+  serde_wasm_bindgen::to_value(&MicroZoneUnpacked {
+    q,
+    r,
+    stacked_state: state.to_u2(),
+  })
+  .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = packStackMicroZone)]
+pub fn pack_stack_micro_zone(position: u8, direction: u8, stacked_state: u8) -> u8 {
+  core_packed::pack_stack_micro_zone(
+    position,
+    direction,
+    core_packed::StackedState::from_u2(stacked_state),
+  )
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StackMicroZoneUnpacked {
+  position: u8,
+  direction: u8,
+  stacked_state: u8,
+}
+
+#[wasm_bindgen(js_name = unpackStackMicroZone)]
+pub fn unpack_stack_micro_zone(v: u8) -> Result<JsValue, JsValue> {
+  let (position, direction, state) = core_packed::unpack_stack_micro_zone(v);
+  serde_wasm_bindgen::to_value(&StackMicroZoneUnpacked {
+    position,
+    direction,
+    stacked_state: state.to_u2(),
+  })
+  .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = packSlotMicroZone)]
+pub fn pack_slot_micro_zone(direction: u8) -> u8 {
+  core_packed::pack_slot_micro_zone(direction)
+}
+
+#[wasm_bindgen(js_name = isStackLayout)]
+pub fn is_stack_layout(stacked_state: u8, surface: u8) -> bool {
+  core_packed::is_stack_layout(
+    core_packed::StackedState::from_u2(stacked_state),
+    surface,
+  )
+}
+
+#[wasm_bindgen(js_name = packDefinition)]
+pub fn pack_definition(card_type: u8, def_id: u16) -> u16 {
+  core_packed::pack_definition(card_type, def_id)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DefinitionUnpacked {
+  card_type: u8,
+  def_id: u16,
+}
+
+#[wasm_bindgen(js_name = unpackDefinition)]
+pub fn unpack_definition(v: u16) -> Result<JsValue, JsValue> {
+  let (card_type, def_id) = core_packed::unpack_definition(v);
+  serde_wasm_bindgen::to_value(&DefinitionUnpacked { card_type, def_id })
+    .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = packZoneDefinition)]
+pub fn pack_zone_definition(card_type: u8) -> u8 {
+  core_packed::pack_zone_definition(card_type)
+}
+
+#[wasm_bindgen(js_name = unpackZoneDefinition)]
+pub fn unpack_zone_definition(v: u8) -> u8 {
+  core_packed::unpack_zone_definition(v)
+}
+
+// Surface band constants exposed as `#[wasm_bindgen]` getters so JS
+// reads `WORLD_LAYER()` etc. — TS-side already exports identical
+// values from `packing.ts` for hot-path use; these wasm getters are
+// for callers that prefer the single-source-of-truth path.
+
+#[wasm_bindgen(js_name = inventoryLayer)]
+pub fn inventory_layer() -> u8 {
+  core_packed::INVENTORY_LAYER
+}
+
+#[wasm_bindgen(js_name = pocketDimensionLayer)]
+pub fn pocket_dimension_layer() -> u8 {
+  core_packed::POCKET_DIMENSION_LAYER
+}
+
+#[wasm_bindgen(js_name = miniZoneLayer)]
+pub fn mini_zone_layer() -> u8 {
+  core_packed::MINI_ZONE_LAYER
+}
+
+#[wasm_bindgen(js_name = worldLayer)]
+pub fn world_layer() -> u8 {
+  core_packed::WORLD_LAYER
 }

@@ -1,0 +1,68 @@
+{
+  "tile": {
+    "desert_1": {
+      "style": [ "#D4A464", "#0b1426", "#0b1426" ],
+      "traits": {
+        "cost": 12,
+        "humidity_min": 0.00, "humidity_max": 0.30,
+        "temperature_min": 0.65, "temperature_max": 1.00,
+        "elevation_min": 0.30, "elevation_max": 0.65,
+        "rarity": 1.0
+      },
+      "stock": [
+        { "aspect": "stone", "max": 1, "default": 0, "climate_axis": "elevation",
+          "climate_axis_min": 0.30, "climate_axis_max": 0.65 },
+        { "aspect": "flora", "max": 1, "default": 0, "climate_axis": "humidity",
+          "climate_axis_min": 0.00, "climate_axis_max": 0.30 }
+      ]
+    },
+    "desert_2": {
+      "style": [ "#B8884F", "#8B6A3F", "#0b1426" ],
+      "traits": {
+        "cost": 14,
+        "humidity_min": 0.00, "humidity_max": 0.25,
+        "temperature_min": 0.70, "temperature_max": 1.00,
+        "elevation_min": 0.30, "elevation_max": 0.65,
+        "rarity": 0.7
+      },
+      "stock": [
+        { "aspect": "stone", "max": 2, "default": 0, "climate_axis": "elevation",
+          "climate_axis_min": 0.30, "climate_axis_max": 0.65 },
+        { "aspect": "flora", "max": 1, "default": 0, "climate_axis": "humidity",
+          "climate_axis_min": 0.00, "climate_axis_max": 0.25 }
+      ]
+    },
+    "desert_3": {
+      "style": [ "#D4A464", "#3B7AB8", "#0b1426" ],
+      "traits": {
+        "cost": 18,
+        "humidity_min": 0.15, "humidity_max": 0.30,
+        "temperature_min": 0.65, "temperature_max": 0.90,
+        "elevation_min": 0.30, "elevation_max": 0.55,
+        "rarity": 0.2
+      },
+      "stock": [
+        { "aspect": "water", "max": 3, "default": 3, "climate_axis": "humidity",
+          "climate_axis_min": 0.15, "climate_axis_max": 0.30 },
+        { "aspect": "food",  "max": 2, "default": 2, "climate_axis": "humidity",
+          "climate_axis_min": 0.15, "climate_axis_max": 0.30 }
+      ]
+    },
+    "desert_4": {
+      "style": [ "#D4A464", "#E8E0D0", "#0b1426" ],
+      "traits": {
+        "cost": 25,
+        "humidity_min": 0.00, "humidity_max": 0.15,
+        "temperature_min": 0.80, "temperature_max": 1.00,
+        "elevation_min": 0.30, "elevation_max": 0.55,
+        "rarity": 0.2
+      },
+      "stock": [
+        { "aspect": "stone", "max": 3, "default": 3, "climate_axis": "elevation",
+          "climate_axis_min": 0.30, "climate_axis_max": 0.55 },
+        { "aspect": "fuel",  "max": 2, "default": 2, "climate_axis": "temperature",
+          "climate_axis_min": 0.80, "climate_axis_max": 1.00 }
+      ]
+    }
+  }
+}

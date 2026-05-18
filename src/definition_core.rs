@@ -66,6 +66,7 @@ pub type AspectId = u8;
 pub const ASPECT_NONE: AspectId = 0;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Aspect {
   pub id: AspectId,
   /// Programmatic name from the JSON, e.g. `"combat"`.
@@ -74,8 +75,29 @@ pub struct Aspect {
   pub description: String,
   /// Unicode icon representing this aspect, e.g. `"⚔"`.
   pub icon: String,
-  /// Group the aspect was declared under, e.g. `"resources"`.
+  /// Display color packed as `0xRRGGBB`. Parsed from a `#RRGGBB`
+  /// string in `aspects.json`. Sub-aspects inherit their parent's
+  /// color when their JSON entry omits the field, same pattern as
+  /// `icon` — lets families render with a single color across the
+  /// tree (e.g. all corpus polarities share the body-red). Renderers
+  /// use this directly: `gfx.fill({ color: aspect.color })`.
+  pub color: u32,
+  /// Top-level family name — the name of the aspect at the root of
+  /// this aspect's parent chain. Top-level aspects have `group ==
+  /// name`; nested sub-aspects carry their root ancestor's name
+  /// (e.g. `berries.group == "food"` when berries is declared under
+  /// fruit which is declared under food). Used for UI grouping
+  /// (color coding pips, sectioning details panels) — categorical
+  /// JSON-level grouping (`resources` / `elements` / ...) was
+  /// dropped in favour of the implicit family-via-hierarchy.
   pub group: String,
+  /// Parent aspect id when this aspect is nested under another in
+  /// `aspects.json` (e.g. `apples` declared inside `food`). Forms a
+  /// single-inheritance tree used by the recipe matcher to widen
+  /// `Entity::Aspect` predicates: a recipe asking for `food` matches
+  /// a card carrying any descendant of `food`. `None` for top-level
+  /// aspects within their group.
+  pub parent: Option<AspectId>,
 }
 
 struct AspectRegistry {
@@ -107,6 +129,41 @@ pub fn aspect(id: AspectId) -> Result<Option<&'static Aspect>, String> {
   Ok(aspects_registry()?.by_id.get((id - 1) as usize))
 }
 
+/// True iff `child` is `ancestor`, or `ancestor` appears anywhere
+/// above `child` in the parent chain. Used by the recipe matcher
+/// to widen `Entity::Aspect` predicates: a card carrying `berries`
+/// satisfies `{aspect: food, min: 1}` because berries → fruit →
+/// food puts food in berries' ancestor set. Returns false on
+/// `ASPECT_NONE` for either argument or unknown ids. Registry
+/// build failure surfaces as `Err`.
+///
+/// Walk depth is bounded by the aspect tree height (≤ 4 today;
+/// soft cap of 16 enforced defensively in case a future content
+/// change introduces a cycle that slipped past the registry-build
+/// check). Same-id case is true (an aspect is trivially a
+/// descendant of itself).
+pub fn is_aspect_descendant(child: AspectId, ancestor: AspectId) -> Result<bool, String> {
+  if child == ASPECT_NONE || ancestor == ASPECT_NONE {
+    return Ok(false);
+  }
+  if child == ancestor {
+    return Ok(true);
+  }
+  let registry = aspects_registry()?;
+  let mut current = child;
+  for _ in 0..16 {
+    let Some(entry) = registry.by_id.get((current - 1) as usize) else {
+      return Ok(false);
+    };
+    match entry.parent {
+      None => return Ok(false),
+      Some(p) if p == ancestor => return Ok(true),
+      Some(p) => current = p,
+    }
+  }
+  Ok(false)
+}
+
 /// All known aspects, ordered by id. `Err` on registry-build failure.
 pub fn aspects() -> Result<&'static [Aspect], String> {
   Ok(&aspects_registry()?.by_id)
@@ -123,69 +180,184 @@ fn build_aspects() -> Result<AspectRegistry, String> {
   let mut id_by_name: BTreeMap<String, AspectId> = BTreeMap::new();
   let mut next_id: u32 = 1;
 
-  for (group_name, group_value) in root {
-    // Skip helper keys like "_comment" / "_rules".
-    if group_name.starts_with('_') {
+  // Flat top-level — every non-`_` key is a top-level aspect entry.
+  // Categorical grouping (resources / elements / ...) was retired in
+  // favour of letting the aspect hierarchy carry the family info via
+  // `Aspect.group`, which is set to the top-level ancestor's name
+  // (so `berries.group == "food"` when berries is nested under
+  // fruit which is nested under food).
+  for (aspect_name, entry_value) in root {
+    if aspect_name.starts_with('_') {
       continue;
     }
-    let group_obj = group_value.as_object().ok_or_else(|| {
-      format!("aspects.json: group {:?} not an object", group_name)
+    let entry_obj = entry_value.as_object().ok_or_else(|| {
+      format!(
+        "aspects.json: aspect {:?} not an object (expected {{\"icon\": ..., \"description\": ...}})",
+        aspect_name
+      )
     })?;
-
-    for (aspect_name, desc_value) in group_obj {
-      if aspect_name.starts_with('_') {
-        continue;
-      }
-      if next_id > AspectId::MAX as u32 {
-        return Err(format!(
-          "aspects.json: more than {} aspects (id overflow)",
-          AspectId::MAX,
-        ));
-      }
-      let id = next_id as AspectId;
-      next_id += 1;
-
-      let entry_obj = desc_value.as_object().ok_or_else(|| {
-        format!(
-          "aspects.json: aspect {}/{} not an object (expected {{\"icon\": ..., \"description\": ...}})",
-          group_name, aspect_name
-        )
-      })?;
-
-      let description = entry_obj
-        .get("description")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-          format!(
-            "aspects.json: aspect {}/{} missing or non-string 'description'",
-            group_name, aspect_name
-          )
-        })?
-        .to_string();
-
-      let icon = entry_obj
-        .get("icon")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-          format!(
-            "aspects.json: aspect {}/{} missing or non-string 'icon'",
-            group_name, aspect_name
-          )
-        })?
-        .to_string();
-
-      by_id.push(Aspect {
-        id,
-        name: aspect_name.clone(),
-        description,
-        icon,
-        group: group_name.clone(),
-      });
-      id_by_name.insert(aspect_name.clone(), id);
-    }
+    register_aspect_recursive(
+      aspect_name,
+      entry_obj,
+      aspect_name,
+      None,
+      None,
+      None,
+      &mut by_id,
+      &mut id_by_name,
+      &mut next_id,
+    )?;
   }
 
   Ok(AspectRegistry { by_id, id_by_name })
+}
+
+/// Register one aspect entry and recurse into any nested sub-aspects.
+///
+/// Property keys (`icon`, `description`) on the entry are read for
+/// this aspect's own metadata; every *other* object-valued key is
+/// treated as a sub-aspect with this aspect as its parent. `_`-
+/// prefixed keys are skipped (the `_comment` convention). Scalar
+/// values under unexpected keys reject — keeps typos visible
+/// instead of silently dropped. The recursion is top-down so a
+/// child's parent id is always already registered when we reach it.
+///
+/// `inherited_icon` / `inherited_color` are the values to fall back
+/// on when this aspect omits its own `icon` / `color` — `None` at
+/// the top level, and the parent aspect's values when recursing into
+/// children. Lets sub-aspects collapse onto their parent's
+/// visuals so callers can render whole families with a single glyph
+/// and color while the JSON stays terse.
+fn register_aspect_recursive(
+  name: &str,
+  entry: &serde_json::Map<String, Value>,
+  group: &str,
+  parent: Option<AspectId>,
+  inherited_icon: Option<&str>,
+  inherited_color: Option<u32>,
+  by_id: &mut Vec<Aspect>,
+  id_by_name: &mut BTreeMap<String, AspectId>,
+  next_id: &mut u32,
+) -> Result<(), String> {
+  if *next_id > AspectId::MAX as u32 {
+    return Err(format!(
+      "aspects.json: more than {} aspects (id overflow)",
+      AspectId::MAX,
+    ));
+  }
+  let id = *next_id as AspectId;
+  *next_id += 1;
+
+  let description = entry
+    .get("description")
+    .and_then(Value::as_str)
+    .ok_or_else(|| {
+      format!(
+        "aspects.json: aspect {}/{} missing or non-string 'description'",
+        group, name
+      )
+    })?
+    .to_string();
+
+  let icon = match entry.get("icon").and_then(Value::as_str) {
+    Some(s) => s.to_string(),
+    None => match inherited_icon {
+      Some(s) => s.to_string(),
+      None => {
+        return Err(format!(
+          "aspects.json: aspect {}/{} missing 'icon' and has no parent to inherit from",
+          group, name
+        ));
+      }
+    },
+  };
+
+  let color = match entry.get("color") {
+    Some(v) => {
+      let s = v.as_str().ok_or_else(|| {
+        format!(
+          "aspects.json: aspect {}/{} 'color' not a string (expected '#RRGGBB')",
+          group, name
+        )
+      })?;
+      parse_hex_color(s).ok_or_else(|| {
+        format!(
+          "aspects.json: aspect {}/{} 'color' {:?} is not a valid '#RRGGBB' hex color",
+          group, name, s
+        )
+      })?
+    }
+    None => match inherited_color {
+      Some(c) => c,
+      None => {
+        return Err(format!(
+          "aspects.json: aspect {}/{} missing 'color' and has no parent to inherit from",
+          group, name
+        ));
+      }
+    },
+  };
+
+  if id_by_name.contains_key(name) {
+    return Err(format!(
+      "aspects.json: aspect {:?} declared more than once",
+      name
+    ));
+  }
+
+  by_id.push(Aspect {
+    id,
+    name: name.to_string(),
+    description,
+    icon: icon.clone(),
+    color,
+    group: group.to_string(),
+    parent,
+  });
+  id_by_name.insert(name.to_string(), id);
+
+  // Walk object-valued keys as nested sub-aspects. Property keys
+  // (`icon` / `description` / `color`) are scalars; `_`-prefixed
+  // keys are documentation. Anything else with an object value is a
+  // child; a non-object value under an unrecognised key is an
+  // authoring error and rejects.
+  for (sub_name, sub_value) in entry {
+    if sub_name.starts_with('_') {
+      continue;
+    }
+    if sub_name == "icon" || sub_name == "description" || sub_name == "color" {
+      continue;
+    }
+    let sub_obj = sub_value.as_object().ok_or_else(|| {
+      format!(
+        "aspects.json: aspect {}/{}: unexpected key {:?} (not a property name and value is not a sub-aspect object)",
+        group, name, sub_name
+      )
+    })?;
+    register_aspect_recursive(
+      sub_name,
+      sub_obj,
+      group,
+      Some(id),
+      Some(&icon),
+      Some(color),
+      by_id,
+      id_by_name,
+      next_id,
+    )?;
+  }
+  Ok(())
+}
+
+/// Parse a `"#RRGGBB"` string into a `0xRRGGBB` `u32`. Returns
+/// `None` for malformed input — caller decides how to report the
+/// error so the message can name the offending aspect.
+fn parse_hex_color(s: &str) -> Option<u32> {
+  let bytes = s.as_bytes();
+  if bytes.len() != 7 || bytes[0] != b'#' {
+    return None;
+  }
+  u32::from_str_radix(&s[1..], 16).ok()
 }
 
 // ---------- Traits ----------
@@ -315,11 +487,16 @@ pub struct CardDefinition {
   /// stored on the definition — clients resolve them via the locales
   /// registry; the bare key is the dev-side fallback.
   pub key: String,
-  /// Style array: indices 0-2 are `#RRGGBB` color codes (primary,
-  /// secondary, outline), validated at build time. Optional indices 3-4
-  /// are sprite filenames (`""` = no sprite): index 3 = background
-  /// sprite, index 4 = foreground sprite.
+  /// Style array: exactly 3 entries — `#RRGGBB` color codes for
+  /// primary, secondary, outline. Sprite filenames previously lived
+  /// here at indices 3-4; they now live on the top-level [`sprite`]
+  /// field. Validated at build time.
   pub style: Vec<String>,
+  /// Optional sprite filename rendered centred on the card body
+  /// (rect cards) or as the foreground overlay (hex cards). Resolved
+  /// at runtime against `public/textures/cards/objects/<filename>`.
+  /// `None` (or missing in JSON) means "no sprite."
+  pub sprite: Option<String>,
   /// `(aspect_id, value)` pairs. Names are translated to ids at registry
   /// build time via `aspect_id`; an unknown aspect name in card data is a
   /// stored registry-build error. Each `aspect_id` appears at most once
@@ -360,6 +537,99 @@ pub struct CardDefinition {
   /// `install_row.valid_at_time + lifecycle_duration_ms`; computed
   /// (never stamped as a future row).
   pub lifecycle_duration_ms: Option<u32>,
+  /// Row-mutable aspect slots. Each entry pins one aspect that
+  /// carries a *per-row* value (independent from the static
+  /// `aspects` field above, which is def-bound). Tile defs that
+  /// declare `stock` get per-tile bits in the `Zone` row; recipes
+  /// matching tile-rooted entities read these bits instead of the
+  /// def's static aspect value.
+  ///
+  /// Capped at 2 slots per def — the per-tile u16 has room for
+  /// two u2 stock values. See
+  /// [docs/TILE_ASPECTS.md](../../../docs/TILE_ASPECTS.md).
+  ///
+  /// Order matters: the first entry maps to the row's stock-slot
+  /// 0, the second to stock-slot 1. Don't reorder once data exists
+  /// — same rationale as `aspects.json` id stability.
+  pub stock: Vec<StockSlot>,
+}
+
+/// Tag for which climate axis a stock slot couples to. Stored on
+/// [`StockSlot::climate_axis`]; `None` means "no coupling, fall back
+/// to an independent per-slot noise band at worldgen time."
+///
+/// Index value (`as u8`) matches the `AXIS_*` constants in
+/// `world_gen.rs` — kept in lockstep so a stock slot's
+/// `climate_axis` can index a `Climate` `[f32; 4]` directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClimateAxis {
+  Elevation = 0,
+  Temperature = 1,
+  Humidity = 2,
+  Aether = 3,
+}
+
+impl ClimateAxis {
+  /// Parse a JSON axis name (lowercase) into the enum. `None` for
+  /// unknown names — the parser surfaces it as a descriptive error.
+  pub fn from_name(name: &str) -> Option<Self> {
+    match name {
+      "elevation" => Some(Self::Elevation),
+      "temperature" => Some(Self::Temperature),
+      "humidity" => Some(Self::Humidity),
+      "aether" => Some(Self::Aether),
+      _ => None,
+    }
+  }
+
+  /// Index into a `[f32; 4]` climate sample bundle. Matches the
+  /// `AXIS_*` constants in `world_gen.rs`.
+  pub fn index(self) -> usize {
+    self as usize
+  }
+}
+
+/// One row-mutable aspect slot declared on a `CardDefinition`. The
+/// def fixes the aspect identity + bounds; the row carries the
+/// current value in 2 bits of the per-tile u16 (mask `0x3` after
+/// the appropriate shift).
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockSlot {
+  /// Aspect this slot tracks. Resolved at registry build time.
+  pub aspect_id: AspectId,
+  /// Maximum value the row can store for this slot. Hard-capped at
+  /// 3 (the u2 width). A def may declare `max: 1` to use the slot
+  /// as a presence boolean.
+  pub max: u8,
+  /// Initial value `cards::create` / mini_zone bootstrap / recipe-
+  /// spawned tiles set the slot to. Bounded by `max`.
+  ///
+  /// **Worldgen ignores `default`** — `world_gen::pick_stocks_for`
+  /// samples values from climate or an independent noise band. The
+  /// field is the value for tiles constructed *outside* the
+  /// climate-driven world generator (manual `assign_tile`, recipe
+  /// `ProductPlace::Location`, etc).
+  pub default: u8,
+  /// Optional climate-axis coupling. When `Some`, worldgen reads
+  /// that axis's sample for the cell, remaps through
+  /// `climate_axis_min`/`climate_axis_max`, and quantises into
+  /// `[0..=max]`. When `None`, worldgen falls back to an
+  /// independent per-slot FBM band keyed by
+  /// `(global_q, global_r, seed + slot_index)`.
+  ///
+  /// Lets authors say "wood density tracks humidity" or "stone
+  /// density tracks elevation" without burning a noise channel per
+  /// slot. See [`docs/BIOME_GENERATION.md`](../../../docs/BIOME_GENERATION.md).
+  pub climate_axis: Option<ClimateAxis>,
+  /// Lower edge of the climate window when `climate_axis` is `Some`.
+  /// Samples below this clamp to 0 stock. Default 0.0 (use the
+  /// entire axis range).
+  pub climate_axis_min: f32,
+  /// Upper edge of the climate window. Samples above this clamp to
+  /// `max` stock. Default 1.0.
+  pub climate_axis_max: f32,
 }
 
 impl CardDefinition {
@@ -373,6 +643,63 @@ impl CardDefinition {
       .traits
       .iter()
       .find_map(|(id, v)| (*id == trait_id).then_some(*v))
+  }
+
+  /// Index (0 or 1) of the stock slot tracking `aspect_id` on this
+  /// definition, or `None` if no slot tracks it. Used by the recipe
+  /// matcher to know which u2 of a tile's row stock holds the
+  /// current value when matching an `Aspect` predicate against a
+  /// tile-rooted entity, and by `action_completion::apply` when
+  /// decrementing on `consume`.
+  pub fn stock_slot_index(&self, aspect_id: AspectId) -> Option<usize> {
+    self
+      .stock
+      .iter()
+      .position(|slot| slot.aspect_id == aspect_id)
+  }
+
+  /// Stock slot index for `aspect_id` with sub-aspect widening:
+  /// prefers an exact `aspect_id` match, falls back to the first
+  /// slot whose declared aspect descends from `aspect_id` in the
+  /// aspect tree. Pairs with `entity_specificity_with_stocks`'s
+  /// matcher widening — a recipe declaring `consume.hex.aspect.wood`
+  /// against a forest tile whose only stock slot is `pine` (pine
+  /// descends from wood) resolves to that pine slot.
+  ///
+  /// Returns `None` only when no slot is an exact or descendant
+  /// match. Multi-descendant tiles (e.g. hypothetical `pine` +
+  /// `oak`) resolve to the first declared slot; callers performing
+  /// `Sub` ops that need to drain multiple descendant slots should
+  /// use [`Self::descendant_stock_slot_indices`] instead.
+  pub fn widened_stock_slot_index(&self, aspect_id: AspectId) -> Option<usize> {
+    // Exact match wins — preserves the simple semantics when the
+    // recipe names the same aspect the tile declares.
+    if let Some(idx) = self.stock_slot_index(aspect_id) {
+      return Some(idx);
+    }
+    self.stock.iter().position(|slot| {
+      is_aspect_descendant(slot.aspect_id, aspect_id).unwrap_or(false)
+    })
+  }
+
+  /// All stock slot indices on this def whose declared aspect
+  /// descends from (or equals) `aspect_id`, in declaration order.
+  /// Used by the consume path to decrement aspects from a multi-
+  /// descendant tile (e.g. drain `pine` first, then `oak`, when a
+  /// recipe consumes `wood`). Empty vec when no slot is a match.
+  pub fn descendant_stock_slot_indices(&self, aspect_id: AspectId) -> Vec<usize> {
+    self
+      .stock
+      .iter()
+      .enumerate()
+      .filter_map(|(idx, slot)| {
+        if is_aspect_descendant(slot.aspect_id, aspect_id).unwrap_or(false) {
+          Some(idx)
+        } else {
+          None
+        }
+      })
+      .collect()
   }
 }
 
@@ -414,6 +741,23 @@ fn cards_registry() -> Result<&'static CardRegistry, String> {
 /// the end of its bucket. `Err` on registry-build failure.
 pub fn decode_definition(packed: u16) -> Result<Option<&'static CardDefinition>, String> {
   Ok(cards_registry()?.by_packed.get(&packed))
+}
+
+/// Every card def of the given `card_type`. Allocates a fresh `Vec`
+/// per call — fine for worldgen-rate use (tens of definitions, called
+/// per-cell on a procedural pass) but cache if it becomes a hot path.
+/// `Err` on registry-build failure.
+///
+/// Used by `world_gen.rs` to walk every `tile` (card_type 7) def when
+/// scoring climate envelopes against a cell's climate samples.
+pub fn cards_of_type(card_type: u8) -> Result<Vec<&'static CardDefinition>, String> {
+  Ok(
+    cards_registry()?
+      .by_packed
+      .values()
+      .filter(|d| d.card_type == card_type)
+      .collect(),
+  )
 }
 
 /// Look up a card's `packed_definition` by its bare key (e.g. `"fatigue"`).
@@ -739,21 +1083,31 @@ fn parse_card(
     .get("style")
     .and_then(Value::as_array)
     .ok_or_else(|| format!("{}: card {}: missing or non-array 'style'", filename, key))?;
-  if style_arr.len() != 3 && style_arr.len() != 5 {
+  if style_arr.len() != 3 {
     return Err(format!(
-      "{}: card {}: style needs 3 entries (colors) or 5 entries (colors + sprites)",
+      "{}: card {}: style needs exactly 3 entries (#RRGGBB colors)",
       filename, key
     ));
   }
-  let mut style: Vec<String> = vec![
+  let style: Vec<String> = vec![
     style_str(filename, key, style_arr, 0)?,
     style_str(filename, key, style_arr, 1)?,
     style_str(filename, key, style_arr, 2)?,
   ];
-  if style_arr.len() == 5 {
-    style.push(sprite_str(filename, key, style_arr, 3)?);
-    style.push(sprite_str(filename, key, style_arr, 4)?);
-  }
+
+  // Optional top-level sprite filename. Replaces the legacy
+  // `style[3]` / `style[4]` slots; rendered centred on the card.
+  let sprite = match obj.get("sprite") {
+    None => None,
+    Some(Value::String(s)) if s.is_empty() => None,
+    Some(Value::String(s)) => Some(s.clone()),
+    Some(_) => {
+      return Err(format!(
+        "{}: card {}: 'sprite' must be a string filename",
+        filename, key
+      ));
+    }
+  };
 
   // `aspects` and `traits` are optional. Empty / missing both mean
   // "no aspects" / "no traits" — most cards declare neither and the
@@ -808,17 +1162,208 @@ fn parse_card(
     flags |= 1u32 << bit;
   }
 
+  // `stock` block: optional, declares row-mutable aspect slots on
+  // this card. See [docs/TILE_ASPECTS.md](../../../docs/TILE_ASPECTS.md).
+  let stock = match obj.get("stock") {
+    None => Vec::new(),
+    Some(Value::Array(arr)) => parse_stock(filename, key, arr)?,
+    Some(_) => {
+      return Err(format!(
+        "{}: card {}: 'stock' must be an array of slot objects",
+        filename, key
+      ));
+    }
+  };
+
   Ok(CardDefinition {
     card_type,
     definition_id,
     key: key.to_string(),
     style,
+    sprite,
     aspects,
     traits,
     flags,
     lifecycle_recipe_key,
     lifecycle_duration_ms,
+    stock,
   })
+}
+
+/// Maximum value a stock slot can take. u2 width (0..=3); the
+/// per-tile u16 has room for two u2 slots.
+const MAX_STOCK_VALUE: u8 = 3;
+
+/// Maximum number of stock slots a single card def can declare.
+/// The per-tile u16 packs `[def_id:u12 | stock0:u2 | stock1:u2]`,
+/// so two slots is the hard cap. Future schema widenings could
+/// raise this; v1 caps strictly.
+const MAX_STOCK_SLOTS: usize = 2;
+
+fn parse_stock(
+  filename: &str,
+  key: &str,
+  arr: &[Value],
+) -> Result<Vec<StockSlot>, String> {
+  if arr.len() > MAX_STOCK_SLOTS {
+    return Err(format!(
+      "{}: card {}: 'stock' has {} slots; maximum is {}",
+      filename, key, arr.len(), MAX_STOCK_SLOTS
+    ));
+  }
+  let mut out: Vec<StockSlot> = Vec::with_capacity(arr.len());
+  let mut seen: BTreeSet<AspectId> = BTreeSet::new();
+  for (i, entry) in arr.iter().enumerate() {
+    let obj = entry.as_object().ok_or_else(|| {
+      format!("{}: card {}: stock[{}] not an object", filename, key, i)
+    })?;
+
+    let aspect_name = obj
+      .get("aspect")
+      .and_then(Value::as_str)
+      .ok_or_else(|| {
+        format!(
+          "{}: card {}: stock[{}].aspect missing or not a string",
+          filename, key, i
+        )
+      })?;
+    let aid = aspect_id(aspect_name)?.ok_or_else(|| {
+      format!(
+        "{}: card {}: stock[{}].aspect {:?} not declared in aspects.json",
+        filename, key, i, aspect_name
+      )
+    })?;
+    if !seen.insert(aid) {
+      return Err(format!(
+        "{}: card {}: aspect {:?} listed in stock more than once",
+        filename, key, aspect_name
+      ));
+    }
+
+    let max = obj
+      .get("max")
+      .and_then(Value::as_u64)
+      .ok_or_else(|| {
+        format!(
+          "{}: card {}: stock[{}].max missing or not a non-negative integer",
+          filename, key, i
+        )
+      })? as u64;
+    if max == 0 || max > MAX_STOCK_VALUE as u64 {
+      return Err(format!(
+        "{}: card {}: stock[{}].max {} out of range (1..={})",
+        filename, key, i, max, MAX_STOCK_VALUE
+      ));
+    }
+    let max = max as u8;
+
+    // `default` defaults to `max` (an aspect with `max: 3` defaults
+    // to 3 stock present — matches the "freshly-generated forest is
+    // full" intuition). Authors can pin a lower default explicitly.
+    let default = match obj.get("default") {
+      None => max,
+      Some(v) => {
+        let n = v.as_u64().ok_or_else(|| {
+          format!(
+            "{}: card {}: stock[{}].default not a non-negative integer",
+            filename, key, i
+          )
+        })?;
+        if n > max as u64 {
+          return Err(format!(
+            "{}: card {}: stock[{}].default {} exceeds max {}",
+            filename, key, i, n, max
+          ));
+        }
+        n as u8
+      }
+    };
+
+    // Optional climate-axis coupling. When present, `climate_axis`
+    // is one of the four axis names (`elevation` / `temperature` /
+    // `humidity` / `aether`); the optional `climate_axis_min` and
+    // `climate_axis_max` clamp the input window before quantising
+    // to `[0..=max]`. Omitting `climate_axis` means worldgen falls
+    // back to an independent FBM band — the v1 default for slots
+    // that should speckle (e.g. boulder density on plains)
+    // rather than follow a smooth climate gradient.
+    let climate_axis = match obj.get("climate_axis") {
+      None => None,
+      Some(v) => {
+        let name = v.as_str().ok_or_else(|| {
+          format!(
+            "{}: card {}: stock[{}].climate_axis not a string",
+            filename, key, i
+          )
+        })?;
+        Some(ClimateAxis::from_name(name).ok_or_else(|| {
+          format!(
+            "{}: card {}: stock[{}].climate_axis {:?} is not one of \
+             elevation / temperature / humidity / aether",
+            filename, key, i, name
+          )
+        })?)
+      }
+    };
+
+    let climate_axis_min = parse_unit_bound(filename, key, i, obj, "climate_axis_min", 0.0)?;
+    let climate_axis_max = parse_unit_bound(filename, key, i, obj, "climate_axis_max", 1.0)?;
+    if climate_axis_min >= climate_axis_max {
+      return Err(format!(
+        "{}: card {}: stock[{}] climate_axis_min {} must be < climate_axis_max {}",
+        filename, key, i, climate_axis_min, climate_axis_max
+      ));
+    }
+    if climate_axis.is_none()
+      && (obj.contains_key("climate_axis_min") || obj.contains_key("climate_axis_max"))
+    {
+      return Err(format!(
+        "{}: card {}: stock[{}] declares climate_axis_min/_max but no climate_axis",
+        filename, key, i
+      ));
+    }
+
+    out.push(StockSlot {
+      aspect_id: aid,
+      max,
+      default,
+      climate_axis,
+      climate_axis_min,
+      climate_axis_max,
+    });
+  }
+  Ok(out)
+}
+
+/// Parse an optional `[0, 1]` float field on a stock-slot object. Uses
+/// `default` when absent. Errors out for non-numeric or out-of-range
+/// values.
+fn parse_unit_bound(
+  filename: &str,
+  key: &str,
+  slot_idx: usize,
+  obj: &serde_json::Map<String, Value>,
+  field: &str,
+  default: f32,
+) -> Result<f32, String> {
+  match obj.get(field) {
+    None => Ok(default),
+    Some(v) => {
+      let n = v.as_f64().ok_or_else(|| {
+        format!(
+          "{}: card {}: stock[{}].{} not a number",
+          filename, key, slot_idx, field
+        )
+      })?;
+      if !(0.0..=1.0).contains(&n) {
+        return Err(format!(
+          "{}: card {}: stock[{}].{} {} out of range [0, 1]",
+          filename, key, slot_idx, field, n
+        ));
+      }
+      Ok(n as f32)
+    }
+  }
 }
 
 fn parse_aspects(
@@ -967,13 +1512,6 @@ fn style_str(filename: &str, key: &str, arr: &[Value], idx: usize) -> Result<Str
       filename, key, idx, s
     ));
   }
-  Ok(s.to_string())
-}
-
-fn sprite_str(filename: &str, key: &str, arr: &[Value], idx: usize) -> Result<String, String> {
-  let s = arr[idx]
-    .as_str()
-    .ok_or_else(|| format!("{}: card {}: style[{}] not a string", filename, key, idx))?;
   Ok(s.to_string())
 }
 

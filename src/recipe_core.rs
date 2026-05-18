@@ -88,7 +88,6 @@ use std::sync::OnceLock;
 use serde_json::Value;
 
 use crate::definition_core::{aspect_id, card_type_ids, decode_definition, AspectId, CardDefinition};
-use crate::flags_core::card_flag_bit;
 use crate::packed::{pack_recipe, RECIPE_ID_MASK, RECIPE_TYPE_OR_CATEGORY_MASK};
 
 // ---------- Entity ----------
@@ -276,6 +275,41 @@ pub enum Duration {
 
 // ---------- Recipe definition ----------
 
+/// Role of a [`ConsumeStock`] target. v1 only supports `Hex` —
+/// mutating a stock slot on the recipe's hex tile. `Root` /
+/// `Slots[i]` are reserved for future use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsumeRole {
+  Hex,
+}
+
+/// Op applied by a [`ConsumeStock`] entry. `Sub` saturates at 0,
+/// `Add` saturates at the slot's declared `max`, `Set` writes the
+/// literal value clamped to `[0, max]`. Parsed from
+/// `output.modify.<ref>.aspect.<name>.<op>: N`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StockOp {
+  Add,
+  Sub,
+  Set,
+}
+
+/// One stock-mutation clause on a [`RecipeDef`]. Parsed from
+/// `output.modify.<ref>.aspect.<name>.<op>: N` — at completion time
+/// `action_completion::apply` walks each entry, looks up the
+/// target's stock slot for `aspect_id`, and applies the op against
+/// the row value with saturating semantics.
+///
+/// See [docs/TILE_ASPECTS.md] §"Recipe stock consumption" and
+/// `output.modify` in [content/recipes/AGENTS.md].
+#[derive(Debug, Clone)]
+pub struct ConsumeStock {
+  pub role: ConsumeRole,
+  pub aspect_id: AspectId,
+  pub op: StockOp,
+  pub delta: u8,
+}
+
 #[derive(Debug, Clone)]
 pub struct RecipeDef {
   /// Packed stable id (see `pack_recipe`).
@@ -296,6 +330,9 @@ pub struct RecipeDef {
   pub set_start: SetStartFlags,
   /// `progress_style` field value (0..=7); see `cards/flags.json`.
   pub style: u8,
+  /// Stock-decrement clauses applied at completion. Empty for recipes
+  /// that don't touch row-mutable aspect values. See [`ConsumeStock`].
+  pub consume: Vec<ConsumeStock>,
 }
 
 // ---------- Registries ----------
@@ -367,12 +404,13 @@ pub struct StackMatch {
 /// client-side recipe scan path for the canonical filters.
 pub fn match_stack_recipe(
   hex_def: u16,
+  hex_stocks: Option<(u8, u8)>,
   root_def: u16,
   slot_defs: &[u16],
   direction: StackDirection,
 ) -> Result<u16, String> {
   Ok(
-    match_stack_recipe_detail(hex_def, root_def, slot_defs, direction, None)?
+    match_stack_recipe_detail(hex_def, hex_stocks, root_def, slot_defs, direction, None)?
       .map(|m| m.recipe_index)
       .unwrap_or(0),
   )
@@ -428,6 +466,7 @@ where
 
 pub fn match_stack_recipe_detail(
   hex_def: u16,
+  hex_stocks: Option<(u8, u8)>,
   root_def: u16,
   slot_defs: &[u16],
   direction: StackDirection,
@@ -453,7 +492,11 @@ pub fn match_stack_recipe_detail(
       None => 0,
       Some(e) => {
         let Some(def) = hex_card else { continue 'recipes };
-        let s = entity_specificity(e, def);
+        // Hex-tier eval is stock-aware: forest tiles, mountain tiles,
+        // etc. carry row-mutable aspect values in `def.stock` rather
+        // than in static `def.aspects`. Slot / root predicates stay
+        // stocks-less (inventory cards don't have row stocks today).
+        let s = entity_specificity_with_stocks(e, def, hex_stocks);
         if s == 0 {
           continue 'recipes;
         }
@@ -646,16 +689,70 @@ pub fn match_magnetic_recipe(
 /// Score how well a single entity matches a card definition; 0 means
 /// no match. See [`Entity`] for weight conventions.
 pub fn entity_specificity(entity: &Entity, def: &CardDefinition) -> u32 {
+  entity_specificity_with_stocks(entity, def, None)
+}
+
+/// Stock-aware variant of [`entity_specificity`]. When `stocks` is
+/// `Some((stock0, stock1))` and `def` declares a `stock` slot whose
+/// aspect descends from an `Entity::Aspect` target, the row stock
+/// value takes priority over the def's static `aspects` map (mirrors
+/// `docs/TILE_ASPECTS.md` § "Recipe matching"). Sub-aspect widening
+/// applies symmetrically: a stock slot declared `pine` satisfies a
+/// `wood.min: N` predicate because pine descends from wood. When no
+/// stock slot covers the predicate's aspect tree, the evaluator
+/// falls back to the static-aspect sum.
+///
+/// Stocks are passed only to the hex predicate eval in
+/// [`match_stack_recipe_detail`] — slot and root predicates ignore
+/// `stocks` since inventory cards don't carry row-mutable aspects in
+/// v1. The combinators (`And`/`Or`/`Not`/`WeightedOr`) thread
+/// `stocks` through unchanged.
+pub fn entity_specificity_with_stocks(
+  entity: &Entity,
+  def: &CardDefinition,
+  stocks: Option<(u8, u8)>,
+) -> u32 {
   match entity {
     Entity::Card(key) => {
       if &def.key == key { 4 } else { 0 }
     }
     Entity::Aspect(aspect, min) => {
-      let val = def
+      use crate::definition_core::is_aspect_descendant;
+      // Sub-aspect widening: a def declaring `berries: 2` or carrying
+      // `berries` in stock satisfies `Entity::Aspect(food, 1)` because
+      // berries → ... → food. `is_aspect_descendant` returns true for
+      // the trivial self-case too.
+      //
+      // Stock takes priority when present: if ANY stock slot's aspect
+      // descends from the predicate target, the row stock total is
+      // authoritative — even when stock=0 with a non-zero static
+      // aspect entry on the same descendant. Depletion semantics: a
+      // chopped-down forest tile (pine stock = 0) should fail a
+      // `wood.min: 1` predicate even if its def still lists a
+      // structural wood aspect.
+      if let Some((s0, s1)) = stocks {
+        let mut had_match = false;
+        let mut stock_total: i32 = 0;
+        for (idx, slot) in def.stock.iter().enumerate() {
+          if is_aspect_descendant(slot.aspect_id, *aspect).unwrap_or(false) {
+            had_match = true;
+            let row_val = if idx == 0 { s0 } else { s1 } as i32;
+            stock_total += row_val;
+          }
+        }
+        if had_match {
+          return if stock_total >= *min { 3 } else { 0 };
+        }
+      }
+      // No stock slot covers the predicate's aspect tree (or no row
+      // stocks supplied at all) — fall back to summing static aspect
+      // entries the same way.
+      let val: i32 = def
         .aspects
         .iter()
-        .find_map(|(a, v)| (a == aspect).then_some(*v))
-        .unwrap_or(0);
+        .filter(|(a, _)| is_aspect_descendant(*a, *aspect).unwrap_or(false))
+        .map(|(_, v)| *v)
+        .sum();
       if val >= *min { 3 } else { 0 }
     }
     Entity::Type(type_id) => {
@@ -668,7 +765,7 @@ pub fn entity_specificity(entity: &Entity, def: &CardDefinition) -> u32 {
     Entity::And(children) => {
       let mut sum: u32 = 0;
       for c in children {
-        let s = entity_specificity(c, def);
+        let s = entity_specificity_with_stocks(c, def, stocks);
         if s == 0 {
           return 0;
         }
@@ -678,14 +775,15 @@ pub fn entity_specificity(entity: &Entity, def: &CardDefinition) -> u32 {
     }
     Entity::Or(children) => children
       .iter()
-      .map(|c| entity_specificity(c, def))
+      .map(|c| entity_specificity_with_stocks(c, def, stocks))
       .max()
       .unwrap_or(0),
     Entity::Not(child) => {
-      if entity_specificity(child, def) == 0 { 1 } else { 0 }
+      if entity_specificity_with_stocks(child, def, stocks) == 0 { 1 } else { 0 }
     }
     Entity::WeightedOr { a, b, .. } => {
-      entity_specificity(a, def).max(entity_specificity(b, def))
+      entity_specificity_with_stocks(a, def, stocks)
+        .max(entity_specificity_with_stocks(b, def, stocks))
     }
   }
 }
@@ -763,21 +861,6 @@ fn recipe_type_names(rt: RecipeType) -> (&'static str, &'static str) {
   }
 }
 
-/// Map a `(type_name, category_name)` pair from a data file's nested
-/// path back to a `RecipeType`. `None` for unknown combinations
-/// (loader skips those — silent so future bucket types can ship
-/// before the Rust enum learns about them).
-fn parse_recipe_type(type_name: &str, category_name: &str) -> Option<RecipeType> {
-  match (type_name, category_name) {
-    ("stack", "up") => Some(RecipeType::Stack(StackDirection::Up)),
-    ("stack", "down") => Some(RecipeType::Stack(StackDirection::Down)),
-    ("on_create", "self") => Some(RecipeType::OnCreate),
-    ("magnetic", "up") => Some(RecipeType::Magnetic(StackDirection::Up)),
-    ("magnetic", "down") => Some(RecipeType::Magnetic(StackDirection::Down)),
-    _ => None,
-  }
-}
-
 // ---------- Main loader ----------
 
 fn build_recipes() -> Result<RecipeRegistry, String> {
@@ -845,48 +928,47 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
     let parsed: Value = serde_json::from_str(content)
       .map_err(|e| format!("{}: parse failed: {}", filename, e))?;
     let root = parsed.as_object().ok_or_else(|| {
-      format!("{}: top-level must be an object keyed by recipe type", filename)
+      format!(
+        "{}: top-level must be an object keyed by `<type>` or `<type>.<category>`",
+        filename
+      )
     })?;
 
-    for (type_name, by_category_val) in root {
-      let categories = by_category_val.as_object().ok_or_else(|| {
-        format!("{}: type {:?}: value not an object", filename, type_name)
+    for (type_key, by_key_val) in root {
+      // Outer file keys are dotted (`stack.up`, `magnetic.up`, bare
+      // `on_create`) — see [`crate::recipe_statement::parse_recipe_type_key`].
+      // Unknown keys (including the `_comment` JSON-doc convention)
+      // are silently skipped so content files can outpace the Rust
+      // enum, matching the cards loader's discipline.
+      let Some(recipe_type) = crate::recipe_statement::parse_recipe_type_key(type_key) else {
+        continue;
+      };
+      let pair = recipe_type_pair(recipe_type)?;
+      let recipes_obj = by_key_val.as_object().ok_or_else(|| {
+        format!(
+          "{}: {}: value not an object of recipe keys",
+          filename, type_key
+        )
       })?;
 
-      for (category_name, by_key_val) in categories {
-        // Unknown (type, category) pairs are silently skipped — same
-        // discipline as cards loader. Lets content files outpace the
-        // Rust enum.
-        let Some(recipe_type) = parse_recipe_type(type_name, category_name) else {
-          continue;
-        };
-        let pair = recipe_type_pair(recipe_type)?;
-        let recipes_obj = by_key_val.as_object().ok_or_else(|| {
+      for (key, recipe_value) in recipes_obj {
+        let stable_id = *packed_ids.get(key).ok_or_else(|| {
           format!(
-            "{}: {}/{}: value not an object of recipe keys",
-            filename, type_name, category_name
+            "{}: recipe {:?} ({}) not in recipes/id.json — run gen-ids.py",
+            filename, key, type_key
           )
         })?;
-
-        for (key, recipe_value) in recipes_obj {
-          let stable_id = *packed_ids.get(key).ok_or_else(|| {
-            format!(
-              "{}: recipe {:?} ({}/{}) not in recipes/id.json — run gen-ids.py",
-              filename, key, type_name, category_name
-            )
-          })?;
-          if id_by_name.contains_key(key) {
-            return Err(format!(
-              "{}: recipe key {:?} declared more than once",
-              filename, key
-            ));
-          }
-          let def =
-            parse_recipe(key, recipe_value, recipe_type, stable_id, filename, &type_ids)?;
-          by_type.entry(pair).or_default().push(stable_id);
-          id_by_name.insert(key.clone(), stable_id);
-          by_id.insert(stable_id, def);
+        if id_by_name.contains_key(key) {
+          return Err(format!(
+            "{}: recipe key {:?} declared more than once",
+            filename, key
+          ));
         }
+        let def =
+          parse_recipe_flat(key, recipe_value, recipe_type, stable_id, filename, &type_ids)?;
+        by_type.entry(pair).or_default().push(stable_id);
+        id_by_name.insert(key.clone(), stable_id);
+        by_id.insert(stable_id, def);
       }
     }
   }
@@ -896,7 +978,18 @@ fn build_recipes() -> Result<RecipeRegistry, String> {
 
 // ---------- Per-recipe parsing ----------
 
-fn parse_recipe(
+/// Parse a recipe whose body is a JSON array of statement strings
+/// (the flat shape). See [content/recipes/AGENTS.md](../recipes/AGENTS.md)
+/// for the full grammar.
+///
+/// Each statement is `<path>` (verb-only) or `<path>: <value>` —
+/// see [`crate::recipe_statement::parse_statement`] for the
+/// lexical layer. This function walks the parsed statements,
+/// dispatches on the first segment (`input` / `output` / `duration`
+/// / `style`), and builds the same `RecipeDef` shape the legacy
+/// nested-object parser produced, so downstream consumers
+/// (matchers, action_completion, magnetic) are untouched.
+fn parse_recipe_flat(
   key: &str,
   recipe_value: &Value,
   recipe_type: RecipeType,
@@ -904,631 +997,744 @@ fn parse_recipe(
   filename: &str,
   type_ids: &BTreeMap<String, u8>,
 ) -> Result<RecipeDef, String> {
-  let obj = recipe_value.as_object().ok_or_else(|| {
-    format!("{}: recipe {:?}: value not an object", filename, key)
+  use crate::recipe_statement::{parse_statement, StatementValue};
+
+  let arr = recipe_value.as_array().ok_or_else(|| {
+    format!(
+      "{}: recipe {:?}: value must be a JSON array of statement strings",
+      filename, key
+    )
   })?;
 
-  let root = obj
-    .get("root")
-    .map(|v| parse_entity(v, type_ids, filename, key, "root"))
-    .transpose()?;
+  // Pre-parse every statement so the per-bucket walkers dispatch on
+  // already-tokenised paths instead of re-parsing the strings.
+  let mut statements: Vec<crate::recipe_statement::Statement> = Vec::with_capacity(arr.len());
+  for (i, raw) in arr.iter().enumerate() {
+    let s = raw.as_str().ok_or_else(|| {
+      format!(
+        "{}: recipe {:?}: statement[{}] must be a string, got {:?}",
+        filename, key, i, raw
+      )
+    })?;
+    let stmt = parse_statement(s).map_err(|e| {
+      format!("{}: recipe {:?}: statement[{}]: {}", filename, key, i, e)
+    })?;
+    statements.push(stmt);
+  }
 
-  let hex = obj
-    .get("hex")
-    .map(|v| parse_entity(v, type_ids, filename, key, "hex"))
-    .transpose()?;
+  // Field accumulators — mirror the `RecipeDef` shape produced by
+  // the legacy parser so downstream consumers see no difference.
+  let mut root_entity: Option<Entity> = None;
+  let mut hex_entity: Option<Entity> = None;
+  let mut slots_entities: Vec<Option<Entity>> = Vec::new();
+  let mut has = HasOps::default();
+  let has_below = HasOps::default();
+  let mut reagent_slots: Vec<Reagent> = Vec::new();
+  let mut reagent_has_root = false;
+  let mut reagent_has_hex = false;
+  let mut output_groups: Vec<ProductGroup> = Vec::new();
+  let mut consume_stocks: Vec<ConsumeStock> = Vec::new();
+  let mut style: u8 = 0;
+  let mut duration_default: Option<u32> = None;
+  let mut duration_tiers: Vec<(u32, Entity)> = Vec::new();
 
-  let slots = match obj.get("slots") {
-    None => Vec::new(),
-    Some(Value::Array(arr)) => arr
-      .iter()
-      .enumerate()
-      .map(|(i, v)| parse_entity(v, type_ids, filename, key, &format!("slots[{}]", i)))
-      .collect::<Result<Vec<_>, _>>()?,
-    Some(_) => {
-      return Err(format!(
-        "{}: recipe {:?}: 'slots' must be an array of entities",
-        filename, key
-      ));
+  for (idx, stmt) in statements.iter().enumerate() {
+    let stmt_label = || format!("{}: recipe {:?}: statement[{}]", filename, key, idx);
+    let bucket = stmt
+      .bucket()
+      .ok_or_else(|| format!("{}: empty path", stmt_label()))?;
+    let tail = &stmt.path[1..];
+    match bucket {
+      "input" => apply_input_statement(
+        tail,
+        stmt.value.as_ref(),
+        type_ids,
+        &stmt_label,
+        &mut root_entity,
+        &mut hex_entity,
+        &mut slots_entities,
+        &mut has,
+      )?,
+      "output" => apply_output_statement(
+        tail,
+        stmt.value.as_ref(),
+        type_ids,
+        &stmt_label,
+        hex_entity.as_ref(),
+        &mut reagent_slots,
+        &mut reagent_has_root,
+        &mut reagent_has_hex,
+        &mut output_groups,
+        &mut consume_stocks,
+      )?,
+      "duration" => apply_duration_statement(
+        tail,
+        stmt.value.as_ref(),
+        type_ids,
+        &stmt_label,
+        &mut duration_default,
+        &mut duration_tiers,
+      )?,
+      "style" => {
+        if tail.len() != 1 || tail[0].as_word() != Some("default") {
+          return Err(format!(
+            "{}: style only accepts `style.default: <name>`",
+            stmt_label()
+          ));
+        }
+        let Some(StatementValue::Str(s)) = stmt.value.as_ref() else {
+          return Err(format!(
+            "{}: style.default needs a string value (none / ltr / rtl)",
+            stmt_label()
+          ));
+        };
+        style = parse_style_name(s).ok_or_else(|| {
+          format!(
+            "{}: style.default {:?} not recognised — use none / ltr / rtl",
+            stmt_label(),
+            s
+          )
+        })?;
+      }
+      other => {
+        return Err(format!(
+          "{}: unknown top-level bucket {:?} (expected input / output / duration / style)",
+          stmt_label(),
+          other
+        ));
+      }
     }
+  }
+
+  // Materialise slots, refusing gaps. A recipe that mentions
+  // `slot.0` and `slot.2` without `slot.1` is almost certainly an
+  // author error.
+  let mut slots: Vec<Entity> = Vec::with_capacity(slots_entities.len());
+  for (i, slot) in slots_entities.iter().enumerate() {
+    let Some(entity) = slot else {
+      return Err(format!(
+        "{}: recipe {:?}: slot[{}] referenced but never assigned a predicate",
+        filename, key, i
+      ));
+    };
+    slots.push(entity.clone());
+  }
+
+  let mut reagents = Reagents::default();
+  reagents.slots = reagent_slots;
+  if reagent_has_root {
+    // Reagent role consumption preserved by replaying the role into
+    // the legacy `Reagents.slots` channel — `Reagent::Root` is the
+    // existing carrier for "the chain root dies." Same for hex.
+    reagents.slots.push(Reagent::Root);
+  }
+  if reagent_has_hex {
+    reagents.slots.push(Reagent::Hex);
+  }
+
+  let duration_value = if !duration_tiers.is_empty() {
+    let fallback = duration_default.ok_or_else(|| {
+      format!(
+        "{}: recipe {:?}: duration has when-tiers but no `duration.default` fallback",
+        filename, key
+      )
+    })?;
+    Some(Duration::Conditional {
+      cases: duration_tiers,
+      fallback,
+    })
+  } else {
+    duration_default.map(Duration::Fixed)
   };
-
-  let reagents = parse_reagents(obj.get("reagents"), type_ids, filename, key)?;
-  let has = parse_has_ops(obj.get("has"), type_ids, filename, key, "has")?;
-  let has_below = parse_has_ops(obj.get("has_below"), type_ids, filename, key, "has_below")?;
-
-  let output = parse_output_groups(obj.get("output"), type_ids, filename, key, "output")?;
-
-  let duration = obj
-    .get("duration")
-    .map(|v| parse_duration(v, type_ids, filename, key))
-    .transpose()?;
-  if duration.is_none() {
+  if duration_value.is_none() {
     return Err(format!(
-      "{}: recipe {:?}: missing required 'duration'",
+      "{}: recipe {:?}: missing required `duration.default: <seconds>`",
       filename, key
     ));
   }
 
   if matches!(recipe_type, RecipeType::OnCreate)
-    && root.is_none()
-    && hex.is_none()
+    && root_entity.is_none()
+    && hex_entity.is_none()
   {
     return Err(format!(
-      "{}: recipe {:?}: on_create recipes must specify 'root' or 'hex'",
+      "{}: recipe {:?}: on_create recipes must declare `input.root.*` or `input.hex.*`",
       filename, key
     ));
   }
 
-  let set_start = parse_set(obj.get("set"), filename, key)?;
-  let style = parse_style(obj.get("style"), filename, key)?;
-
-  let def = RecipeDef {
+  Ok(RecipeDef {
     index: stable_id,
     id: key.to_string(),
     recipe_type,
-    root,
-    hex,
+    root: root_entity,
+    hex: hex_entity,
     slots,
     reagents,
     has,
     has_below,
-    output,
-    duration,
-    set_start,
+    output: output_groups,
+    duration: duration_value,
+    set_start: SetStartFlags::default(),
     style,
-  };
-  Ok(def)
+    consume: consume_stocks,
+  })
 }
 
-// ---------- Style ----------
+// ---------- Per-bucket statement appliers --------------------------------
 
-fn parse_style(value: Option<&Value>, filename: &str, recipe_id: &str) -> Result<u8, String> {
-  let Some(v) = value else { return Ok(0) };
-  let s = v.as_str().ok_or_else(|| {
-    format!(
-      "{}: recipe {:?}: 'style' must be a string (\"none\", \"ltr\", \"rtl\", ...); got {:?}",
-      filename, recipe_id, v
-    )
-  })?;
+fn parse_style_name(s: &str) -> Option<u8> {
   match s {
-    "none" => Ok(0),
-    "ltr" => Ok(1),
-    "rtl" => Ok(2),
-    other => Err(format!(
-      "{}: recipe {:?}: unknown style {:?} (known: \"none\", \"ltr\", \"rtl\")",
-      filename, recipe_id, other
+    "none" => Some(0),
+    "ltr" => Some(1),
+    "rtl" => Some(2),
+    _ => None,
+  }
+}
+
+/// Resolve an aspect-name segment against the registry. Surfaces a
+/// good error message naming the offending recipe statement.
+fn resolve_aspect_segment(
+  name: &str,
+  stmt_label: &dyn Fn() -> String,
+) -> Result<AspectId, String> {
+  if crate::recipe_statement::is_reserved_aspect_name(name) {
+    return Err(format!(
+      "{}: aspect name {:?} collides with a reserved path token — \
+       rename the aspect in aspects.json",
+      stmt_label(),
+      name
+    ));
+  }
+  match aspect_id(name).map_err(|e| format!("{}: {}", stmt_label(), e))? {
+    Some(id) => Ok(id),
+    None => Err(format!(
+      "{}: aspect {:?} not registered in aspects.json",
+      stmt_label(),
+      name
     )),
   }
 }
 
-// ---------- Set / SetStartFlags ----------
-
-fn parse_set(
-  value: Option<&Value>,
-  filename: &str,
-  recipe_id: &str,
-) -> Result<SetStartFlags, String> {
-  let Some(v) = value else { return Ok(SetStartFlags::default()) };
-  let obj = v.as_object().ok_or_else(|| {
-    format!("{}: recipe {:?}: 'set' must be an object", filename, recipe_id)
-  })?;
-  // Only `start` is defined today; other timing keys (`end`, …) reserved.
-  for k in obj.keys() {
-    if k != "start" {
-      return Err(format!(
-        "{}: recipe {:?}: set.{} unknown timing key (known: \"start\")",
-        filename, recipe_id, k
-      ));
-    }
-  }
-  let Some(start_val) = obj.get("start") else {
-    return Ok(SetStartFlags::default());
-  };
-  let start_obj = start_val.as_object().ok_or_else(|| {
-    format!("{}: recipe {:?}: 'set.start' must be an object", filename, recipe_id)
-  })?;
-  let mut flags = SetStartFlags::default();
-  for (role, flags_val) in start_obj {
-    let flags_obj = flags_val.as_object().ok_or_else(|| {
-      format!(
-        "{}: recipe {:?}: set.start.{} must be an object of flag→bool entries",
-        filename, recipe_id, role
-      )
-    })?;
-    let mut ops = FlagOps::default();
-    for (flag_name, bit_val) in flags_obj {
-      let set = bit_val.as_bool().ok_or_else(|| {
-        format!(
-          "{}: recipe {:?}: set.start.{}.{} not a boolean",
-          filename, recipe_id, role, flag_name
-        )
-      })?;
-      if flag_name == "dead" {
-        return Err(format!(
-          "{}: recipe {:?}: set.start.{}.dead: 'dead' cannot be set via set.start",
-          filename, recipe_id, role
-        ));
-      }
-      let bit = card_flag_bit(flag_name)
-        .map_err(|e| format!("{}: recipe {:?}: flag registry: {}", filename, recipe_id, e))?
-        .ok_or_else(|| {
-          format!(
-            "{}: recipe {:?}: set.start.{}.{}: unknown flag (not in cards/flags.json)",
-            filename, recipe_id, role, flag_name
-          )
-        })?;
-      if set {
-        ops.set_mask |= 1u32 << bit;
-      } else {
-        ops.clear_mask |= 1u32 << bit;
-      }
-    }
-    match role.as_str() {
-      "root" => flags.root = ops,
-      "slot" => flags.slot = ops,
-      "hex" => flags.hex = ops,
-      other => {
-        return Err(format!(
-          "{}: recipe {:?}: set.start.{}: unknown role (known: \"root\", \"slot\", \"hex\")",
-          filename, recipe_id, other
-        ));
-      }
-    }
-  }
-  Ok(flags)
-}
-
-// ---------- Output groups ----------
-
-fn parse_output_groups(
-  value: Option<&Value>,
-  type_ids: &BTreeMap<String, u8>,
-  filename: &str,
-  recipe_id: &str,
-  field_label: &str,
-) -> Result<Vec<ProductGroup>, String> {
-  let Some(v) = value else { return Ok(Vec::new()) };
-  let obj = v.as_object().ok_or_else(|| {
-    format!(
-      "{}: recipe {:?}: {} must be an object {{ place: {{ owner: [cards] }} }}",
-      filename, recipe_id, field_label
-    )
-  })?;
-  let mut groups: Vec<ProductGroup> = Vec::new();
-  for (place_name, place_val) in obj {
-    let place = match place_name.as_str() {
-      "inventory" => ProductPlace::Inventory,
-      "location" => ProductPlace::Location,
-      other => {
-        return Err(format!(
-          "{}: recipe {:?}: {}.{}: unknown place (known: \"inventory\", \"location\")",
-          filename, recipe_id, field_label, other
-        ));
-      }
-    };
-    let place_obj = place_val.as_object().ok_or_else(|| {
-      format!(
-        "{}: recipe {:?}: {}.{} must be an object {{ owner: [cards] }}",
-        filename, recipe_id, field_label, place_name
-      )
-    })?;
-    for (owner_name, entities_val) in place_obj {
-      let owner = match owner_name.as_str() {
-        "root" => ProductOwner::Root,
-        "actor" => ProductOwner::Actor,
-        "hex" => ProductOwner::Hex,
-        "action" => ProductOwner::Action,
-        other => {
-          return Err(format!(
-            "{}: recipe {:?}: {}.{}.{}: unknown owner (known: \"root\", \"actor\", \"hex\", \"action\")",
-            filename, recipe_id, field_label, place_name, other
-          ));
-        }
-      };
-      if place == ProductPlace::Location && owner != ProductOwner::Hex {
-        return Err(format!(
-          "{}: recipe {:?}: {}.location.{}: only `hex` owner is supported for location outputs",
-          filename, recipe_id, field_label, owner_name
-        ));
-      }
-      let arr = entities_val.as_array().ok_or_else(|| {
-        format!(
-          "{}: recipe {:?}: {}.{}.{} must be an array of card keys",
-          filename, recipe_id, field_label, place_name, owner_name
-        )
-      })?;
-      let entities = arr
-        .iter()
-        .enumerate()
-        .map(|(i, ent)| {
-          parse_entity(
-            ent,
-            type_ids,
-            filename,
-            recipe_id,
-            &format!("{}.{}.{}[{}]", field_label, place_name, owner_name, i),
-          )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-      groups.push(ProductGroup {
-        target: ProductTarget { place, owner },
-        entities,
-      });
-    }
-  }
-  Ok(groups)
-}
-
-// ---------- Reagents ----------
-
-fn parse_reagents(
-  value: Option<&Value>,
-  type_ids: &BTreeMap<String, u8>,
-  filename: &str,
-  recipe_id: &str,
-) -> Result<Reagents, String> {
-  let Some(v) = value else { return Ok(Reagents::default()) };
-  let obj = v.as_object().ok_or_else(|| {
-    format!(
-      "{}: recipe {:?}: 'reagents' must be an object with optional 'slots' / 'roles' / 'has' / 'has_below'",
-      filename, recipe_id
-    )
-  })?;
-  for k in obj.keys() {
-    if !matches!(k.as_str(), "slots" | "roles" | "has" | "has_below") {
-      return Err(format!(
-        "{}: recipe {:?}: reagents.{}: unknown key (known: \"slots\", \"roles\", \"has\", \"has_below\")",
-        filename, recipe_id, k
-      ));
-    }
-  }
-
-  let mut slots: Vec<Reagent> = Vec::new();
-  if let Some(slots_val) = obj.get("slots") {
-    let arr = slots_val.as_array().ok_or_else(|| {
-      format!(
-        "{}: recipe {:?}: reagents.slots must be an array of 0-indexed slot positions",
-        filename, recipe_id
-      )
-    })?;
-    for v in arr {
-      let n = v.as_u64().ok_or_else(|| {
-        format!(
-          "{}: recipe {:?}: reagents.slots[{}]: not a non-negative integer",
-          filename, recipe_id, v
-        )
-      })?;
-      if n > u8::MAX as u64 {
-        return Err(format!(
-          "{}: recipe {:?}: reagents.slots {} exceeds u8 max",
-          filename, recipe_id, n
-        ));
-      }
-      slots.push(Reagent::Slot(n as u8));
-    }
-  }
-  if let Some(roles_val) = obj.get("roles") {
-    let arr = roles_val.as_array().ok_or_else(|| {
-      format!(
-        "{}: recipe {:?}: reagents.roles must be an array of role names",
-        filename, recipe_id
-      )
-    })?;
-    for v in arr {
-      let s = v.as_str().ok_or_else(|| {
-        format!(
-          "{}: recipe {:?}: reagents.roles[{:?}]: not a string",
-          filename, recipe_id, v
-        )
-      })?;
-      let r = match s {
-        "root" => Reagent::Root,
-        "hex" => Reagent::Hex,
-        other => {
-          return Err(format!(
-            "{}: recipe {:?}: reagents.roles[{:?}]: unknown role (known: \"root\", \"hex\")",
-            filename, recipe_id, other
-          ));
-        }
-      };
-      slots.push(r);
-    }
-  }
-
-  let has = parse_has_ops(obj.get("has"), type_ids, filename, recipe_id, "reagents.has")?;
-  let has_below = parse_has_ops(
-    obj.get("has_below"),
-    type_ids,
-    filename,
-    recipe_id,
-    "reagents.has_below",
-  )?;
-  Ok(Reagents { slots, has, has_below })
-}
-
-// ---------- Has ops ----------
-
-fn parse_has_ops(
-  value: Option<&Value>,
-  type_ids: &BTreeMap<String, u8>,
-  filename: &str,
-  recipe_id: &str,
-  path_label: &str,
-) -> Result<HasOps, String> {
-  let Some(v) = value else { return Ok(HasOps::default()) };
-  let obj = v.as_object().ok_or_else(|| {
-    format!(
-      "{}: recipe {:?}: {} must be an object with \"root\" / \"actor\" lists",
-      filename, recipe_id, path_label
-    )
-  })?;
-  let mut ops = HasOps::default();
-  for (k, v) in obj {
-    match k.as_str() {
-      "root" | "actor" => {
-        let arr = v.as_array().ok_or_else(|| {
-          format!(
-            "{}: recipe {:?}: {}.{} must be an array of entities",
-            filename, recipe_id, path_label, k
-          )
-        })?;
-        let entries = arr
-          .iter()
-          .enumerate()
-          .map(|(i, ent)| {
-            parse_entity(
-              ent,
-              type_ids,
-              filename,
-              recipe_id,
-              &format!("{}.{}[{}]", path_label, k, i),
-            )
-          })
-          .collect::<Result<Vec<_>, _>>()?;
-        if k == "root" {
-          ops.root = entries;
-        } else {
-          ops.actor = entries;
-        }
-      }
-      other => {
-        return Err(format!(
-          "{}: recipe {:?}: {}.{}: unknown role (known: \"root\", \"actor\")",
-          filename, recipe_id, path_label, other
-        ));
-      }
-    }
-  }
-  Ok(ops)
-}
-
-// ---------- Entity parsing ----------
-
-/// Reserved bare-string sentinel — `"any"` parses as `Entity::Any`.
-const ENTITY_ANY_LITERAL: &str = "any";
-/// Bare strings starting with `'@'` are card-type sentinels:
-/// `"@discipline"` → `Entity::Type(type_id)`.
-const ENTITY_TYPE_PREFIX: char = '@';
-
-fn parse_entity(
-  value: &Value,
-  type_ids: &BTreeMap<String, u8>,
-  filename: &str,
-  recipe_id: &str,
-  path: &str,
+/// Parse an `aspect.<name>.min` suffix on a path tail. Returns the
+/// resolved `Entity::Aspect`. The statement's integer value is the
+/// `min` threshold. Errors on malformed suffixes.
+fn entity_from_aspect_min_tail(
+  tail: &[crate::recipe_statement::Segment],
+  value: Option<&crate::recipe_statement::StatementValue>,
+  stmt_label: &dyn Fn() -> String,
 ) -> Result<Entity, String> {
-  // String sugar: card-key, `"any"`, or `"@<type>"`.
-  if let Some(s) = value.as_str() {
-    if s == ENTITY_ANY_LITERAL {
-      return Ok(Entity::Any);
-    }
-    if let Some(type_name) = s.strip_prefix(ENTITY_TYPE_PREFIX) {
-      let &type_id = type_ids.get(type_name).ok_or_else(|| {
-        format!(
-          "{}: recipe {:?} {}: unknown card type {:?} (not in cards/types.json)",
-          filename, recipe_id, path, type_name
-        )
-      })?;
-      return Ok(Entity::Type(type_id));
-    }
-    return Ok(Entity::Card(s.to_string()));
-  }
-
-  // Array sugar: OR-list of entities.
-  if let Some(arr) = value.as_array() {
-    let children: Vec<Entity> = arr
-      .iter()
-      .enumerate()
-      .map(|(i, v)| parse_entity(v, type_ids, filename, recipe_id, &format!("{}[{}]", path, i)))
-      .collect::<Result<_, _>>()?;
-    return Ok(match children.len() {
-      0 => {
-        return Err(format!(
-          "{}: recipe {:?} {}: empty OR-list (use at least one entity)",
-          filename, recipe_id, path
-        ));
-      }
-      1 => children.into_iter().next().unwrap(),
-      _ => Entity::Or(children),
-    });
-  }
-
-  // Tagged object: dispatch on first recognized key.
-  let obj = value.as_object().ok_or_else(|| {
-    format!(
-      "{}: recipe {:?} {}: entity not a string, array, or object: {:?}",
-      filename, recipe_id, path, value
-    )
-  })?;
-
-  if let Some(card_val) = obj.get("card") {
-    let s = card_val.as_str().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'card' must be a string", filename, recipe_id, path)
-    })?;
-    return Ok(Entity::Card(s.to_string()));
-  }
-  if let Some(aspect_val) = obj.get("aspect") {
-    let name = aspect_val.as_str().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'aspect' must be a string", filename, recipe_id, path)
-    })?;
-    let id = aspect_id(name)?.ok_or_else(|| {
-      format!(
-        "{}: recipe {:?} {}: unknown aspect {:?} (not in aspects.json)",
-        filename, recipe_id, path, name
-      )
-    })?;
-    let min = obj
-      .get("min")
-      .map(|v| {
-        v.as_i64().ok_or_else(|| {
-          format!(
-            "{}: recipe {:?} {}: aspect.min not an integer: {:?}",
-            filename, recipe_id, path, v
-          )
-        })
-      })
-      .transpose()?
-      .unwrap_or(1) as i32;
-    return Ok(Entity::Aspect(id, min));
-  }
-  if obj.contains_key("category") {
+  // Expected suffix: `aspect.<name>.min`
+  if tail.len() != 3 {
     return Err(format!(
-      "{}: recipe {:?} {}: 'category' predicate retired — card_category dimension was removed. See docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md.",
-      filename, recipe_id, path
+      "{}: aspect predicate must be `aspect.<name>.min: <int>`",
+      stmt_label()
     ));
   }
-  if let Some(flag_val) = obj.get("flag") {
-    let name = flag_val.as_str().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'flag' must be a string", filename, recipe_id, path)
-    })?;
-    let bit = card_flag_bit(name)?.ok_or_else(|| {
-      format!(
-        "{}: recipe {:?} {}: unknown flag {:?} (not in cards/flags.json)",
-        filename, recipe_id, path, name
-      )
-    })?;
-    return Ok(Entity::Flag(bit));
+  if tail[0].as_word() != Some("aspect") {
+    return Err(format!(
+      "{}: expected `aspect.<name>.min`, got {:?}",
+      stmt_label(),
+      tail[0]
+    ));
   }
-  if let Some(any_val) = obj.get("any") {
-    let b = any_val.as_bool().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'any' must be a boolean", filename, recipe_id, path)
+  let name = tail[1].as_word().ok_or_else(|| {
+    format!("{}: aspect name must be a word, got {:?}", stmt_label(), tail[1])
+  })?;
+  if tail[2].as_word() != Some("min") {
+    return Err(format!(
+      "{}: aspect predicate suffix must be `min`, got {:?} (v1 supports min only)",
+      stmt_label(),
+      tail[2]
+    ));
+  }
+  let aspect = resolve_aspect_segment(name, stmt_label)?;
+  let min = value
+    .and_then(crate::recipe_statement::StatementValue::as_int)
+    .ok_or_else(|| {
+      format!("{}: aspect.{}.min needs an integer value", stmt_label(), name)
     })?;
-    if !b {
+  Ok(Entity::Aspect(aspect, min as i32))
+}
+
+/// Parse a `def_id` suffix on a path tail. Returns the resolved
+/// `Entity::Card`. The statement's string value is the card key.
+fn entity_from_def_id_tail(
+  tail: &[crate::recipe_statement::Segment],
+  value: Option<&crate::recipe_statement::StatementValue>,
+  stmt_label: &dyn Fn() -> String,
+) -> Result<Entity, String> {
+  if tail.len() != 1 || tail[0].as_word() != Some("def_id") {
+    return Err(format!(
+      "{}: expected `def_id: <key>`, got tail {:?}",
+      stmt_label(),
+      tail
+    ));
+  }
+  let s = value
+    .and_then(crate::recipe_statement::StatementValue::as_str)
+    .ok_or_else(|| format!("{}: def_id needs a string value", stmt_label()))?;
+  Ok(Entity::Card(s.to_string()))
+}
+
+/// Target an input statement points at, after the anchor + optional
+/// slot index are consumed.
+enum InputTarget {
+  Root,
+  Hex,
+  Slot(usize),
+  HasActor,
+}
+
+/// Consume the anchor (and slot index, if present) off the head of
+/// `tail` and return `(target, entity-suffix tail)`. `slot.<i>` and
+/// `actor` (sugar for `slot.0`) both produce `InputTarget::Slot`.
+fn split_input_anchor<'a>(
+  tail: &'a [crate::recipe_statement::Segment],
+  stmt_label: &dyn Fn() -> String,
+) -> Result<(InputTarget, &'a [crate::recipe_statement::Segment]), String> {
+  let anchor = tail
+    .first()
+    .and_then(crate::recipe_statement::Segment::as_word)
+    .ok_or_else(|| format!("{}: input.* needs an anchor word", stmt_label()))?;
+  match anchor {
+    "root" => Ok((InputTarget::Root, &tail[1..])),
+    "hex" => Ok((InputTarget::Hex, &tail[1..])),
+    "actor" => Ok((InputTarget::Slot(0), &tail[1..])),
+    "has" => Ok((InputTarget::HasActor, &tail[1..])),
+    "slot" => {
+      let i = tail
+        .get(1)
+        .and_then(crate::recipe_statement::Segment::as_index)
+        .ok_or_else(|| format!("{}: slot anchor needs `slot.<i>` index", stmt_label()))?;
+      Ok((InputTarget::Slot(i as usize), &tail[2..]))
+    }
+    other => Err(format!(
+      "{}: unknown input anchor {:?} (expected root / hex / slot / actor / has)",
+      stmt_label(),
+      other
+    )),
+  }
+}
+
+/// Parse one `input.<...>` statement, mutating the recipe's match-
+/// side accumulators.
+#[allow(clippy::too_many_arguments)]
+fn apply_input_statement(
+  tail: &[crate::recipe_statement::Segment],
+  value: Option<&crate::recipe_statement::StatementValue>,
+  _type_ids: &BTreeMap<String, u8>,
+  stmt_label: &dyn Fn() -> String,
+  root: &mut Option<Entity>,
+  hex: &mut Option<Entity>,
+  slots: &mut Vec<Option<Entity>>,
+  has: &mut HasOps,
+) -> Result<(), String> {
+  let (target, rest) = split_input_anchor(tail, stmt_label)?;
+  let head = rest.first().and_then(crate::recipe_statement::Segment::as_word);
+  let entity = match head {
+    Some("def_id") => entity_from_def_id_tail(rest, value, stmt_label)?,
+    Some("aspect") => entity_from_aspect_min_tail(rest, value, stmt_label)?,
+    _ => {
       return Err(format!(
-        "{}: recipe {:?} {}: 'any': false has no meaning — use a real predicate",
-        filename, recipe_id, path
+        "{}: input target expects `.def_id: <key>` or `.aspect.<name>.min: <int>`, got tail {:?}",
+        stmt_label(),
+        rest
       ));
     }
-    return Ok(Entity::Any);
-  }
-  if let Some(and_val) = obj.get("and") {
-    let arr = and_val.as_array().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'and' must be an array of entities", filename, recipe_id, path)
-    })?;
-    let children: Vec<Entity> = arr
-      .iter()
-      .enumerate()
-      .map(|(i, v)| parse_entity(v, type_ids, filename, recipe_id, &format!("{}.and[{}]", path, i)))
-      .collect::<Result<_, _>>()?;
-    if children.is_empty() {
-      return Err(format!("{}: recipe {:?} {}: empty 'and' list", filename, recipe_id, path));
-    }
-    return Ok(Entity::And(children));
-  }
-  if let Some(or_val) = obj.get("or") {
-    let arr = or_val.as_array().ok_or_else(|| {
-      format!("{}: recipe {:?} {}: 'or' must be an array of entities", filename, recipe_id, path)
-    })?;
-    let children: Vec<Entity> = arr
-      .iter()
-      .enumerate()
-      .map(|(i, v)| parse_entity(v, type_ids, filename, recipe_id, &format!("{}.or[{}]", path, i)))
-      .collect::<Result<_, _>>()?;
-    if children.is_empty() {
-      return Err(format!("{}: recipe {:?} {}: empty 'or' list", filename, recipe_id, path));
-    }
-    return Ok(Entity::Or(children));
-  }
-  if let Some(not_val) = obj.get("not") {
-    let child = parse_entity(not_val, type_ids, filename, recipe_id, &format!("{}.not", path))?;
-    return Ok(Entity::Not(Box::new(child)));
-  }
+  };
 
-  Err(format!(
-    "{}: recipe {:?} {}: object has no recognized entity key (expected one of: card, aspect, category, flag, any, and, or, not); got keys {:?}",
-    filename, recipe_id, path, obj.keys().collect::<Vec<_>>()
-  ))
+  match target {
+    InputTarget::Root => {
+      if root.is_some() {
+        return Err(format!("{}: input.root.* declared more than once", stmt_label()));
+      }
+      *root = Some(entity);
+    }
+    InputTarget::Hex => {
+      if hex.is_some() {
+        return Err(format!("{}: input.hex.* declared more than once", stmt_label()));
+      }
+      *hex = Some(entity);
+    }
+    InputTarget::Slot(i) => {
+      if slots.len() <= i {
+        slots.resize(i + 1, None);
+      }
+      if slots[i].is_some() {
+        return Err(format!(
+          "{}: input.slot.{}.* declared more than once",
+          stmt_label(),
+          i
+        ));
+      }
+      slots[i] = Some(entity);
+    }
+    InputTarget::HasActor => {
+      // v1: implicit role = actor, direction = above. The entity
+      // joins `has.actor`. `input.has.root.*` and `has_below.*`
+      // are deferred until a recipe needs them.
+      has.actor.push(entity);
+    }
+  }
+  Ok(())
 }
 
-// ---------- Duration parsing ----------
+// --- Output appliers ---
 
-fn parse_duration(
-  value: &Value,
-  type_ids: &BTreeMap<String, u8>,
-  filename: &str,
-  recipe_id: &str,
-) -> Result<Duration, String> {
-  if let Some(n) = value.as_u64() {
-    return Ok(Duration::Fixed(n as u32));
+/// `output.destroy.<card_ref>` resolves to one of the legacy
+/// [`Reagent`] variants. `slot.<i>` → `Slot(i)`, `actor` → `Slot(0)`,
+/// `root` → `Root`, `hex` → `Hex`. Resolver chains (`.owner`, etc.)
+/// are reserved for future use; v1 rejects them with a clear error.
+fn parse_destroy_card_ref(
+  segs: &[crate::recipe_statement::Segment],
+  stmt_label: &dyn Fn() -> String,
+) -> Result<Reagent, String> {
+  let head = segs
+    .first()
+    .and_then(crate::recipe_statement::Segment::as_word)
+    .ok_or_else(|| format!("{}: destroy needs a card ref", stmt_label()))?;
+  match head {
+    "root" if segs.len() == 1 => Ok(Reagent::Root),
+    "hex" if segs.len() == 1 => Ok(Reagent::Hex),
+    "actor" if segs.len() == 1 => Ok(Reagent::Slot(0)),
+    "slot" => {
+      if segs.len() != 2 {
+        return Err(format!(
+          "{}: destroy.slot needs `slot.<i>` with index only",
+          stmt_label()
+        ));
+      }
+      let i = segs[1].as_index().ok_or_else(|| {
+        format!("{}: slot index must be an integer", stmt_label())
+      })?;
+      Ok(Reagent::Slot(i as u8))
+    }
+    other => Err(format!(
+      "{}: destroy ref {:?} not supported in v1 (expected root / hex / actor / slot.<i>)",
+      stmt_label(),
+      other
+    )),
   }
-  let arr = value.as_array().ok_or_else(|| {
-    format!(
-      "{}: recipe {:?}: 'duration' must be a non-negative integer or an array of tier objects",
-      filename, recipe_id
-    )
+}
+
+/// Resolve a `create` target ref to a `ProductOwner`. Both `actor`
+/// and `slot.0` map to `Actor`; `slot.0.owner` also maps to `Actor`
+/// (semantically the actor's container). `root` → `Root`, `hex` →
+/// `Hex`. Longer resolver chains reject for v1.
+fn parse_create_owner(
+  segs: &[crate::recipe_statement::Segment],
+  stmt_label: &dyn Fn() -> String,
+) -> Result<ProductOwner, String> {
+  let words: Vec<&str> = segs
+    .iter()
+    .filter_map(crate::recipe_statement::Segment::as_word)
+    .collect();
+  let head = segs.first().and_then(crate::recipe_statement::Segment::as_word);
+  match (head, segs.len(), words.last().copied()) {
+    (Some("root"), 1, _) => Ok(ProductOwner::Root),
+    (Some("hex"), 1, _) => Ok(ProductOwner::Hex),
+    (Some("actor"), 1, _) => Ok(ProductOwner::Actor),
+    // `actor.owner` is the soul that contains the actor — under
+    // today's semantics that's where `Actor`-placed inventory items
+    // already land (resolve_owner walks UP via
+    // inventory_container_for_at), so the two refs collapse.
+    (Some("actor"), 2, Some("owner")) => Ok(ProductOwner::Actor),
+    (Some("slot"), 2, _) => {
+      // `slot.<i>` — only `slot.0` is meaningful as a create target;
+      // higher indices have no defined owner today.
+      let i = segs[1].as_index().unwrap_or(u32::MAX);
+      if i == 0 {
+        Ok(ProductOwner::Actor)
+      } else {
+        Err(format!(
+          "{}: create.slot.{} has no defined owner (only slot.0 = actor is supported in v1)",
+          stmt_label(),
+          i
+        ))
+      }
+    }
+    (Some("slot"), 3, Some("owner")) => {
+      let i = segs[1].as_index().unwrap_or(u32::MAX);
+      if i == 0 {
+        Ok(ProductOwner::Actor)
+      } else {
+        Err(format!(
+          "{}: create.slot.{}.owner has no defined owner (only slot.0.owner = actor's soul is supported in v1)",
+          stmt_label(),
+          i
+        ))
+      }
+    }
+    _ => Err(format!(
+      "{}: create ref not supported in v1 (expected root / hex / actor / slot.0 / slot.0.owner)",
+      stmt_label()
+    )),
+  }
+}
+
+/// Parse `output.modify.hex.aspect.<name>.<op>` → `(aspect_id, op)`.
+/// v1 only accepts `hex` as the target ref. Other refs reject at
+/// parse time (per the plan's "card-rooted stock writes" out-of-
+/// scope note).
+fn parse_modify_target(
+  segs: &[crate::recipe_statement::Segment],
+  stmt_label: &dyn Fn() -> String,
+) -> Result<(AspectId, StockOp), String> {
+  // Expect: <ref-segments> . aspect . <name> . <op>
+  // v1 ref must be `hex` (single segment).
+  if segs.len() < 4 {
+    return Err(format!(
+      "{}: modify expects `<ref>.aspect.<name>.<op>`",
+      stmt_label()
+    ));
+  }
+  if segs[0].as_word() != Some("hex") {
+    return Err(format!(
+      "{}: modify ref {:?} not supported in v1 (only `hex` has row-mutable storage today)",
+      stmt_label(),
+      segs[0]
+    ));
+  }
+  if segs[1].as_word() != Some("aspect") {
+    return Err(format!(
+      "{}: modify expects `hex.aspect.<name>.<op>`, got {:?}",
+      stmt_label(),
+      segs[1]
+    ));
+  }
+  let aspect_name = segs[2].as_word().ok_or_else(|| {
+    format!("{}: aspect name must be a word", stmt_label())
   })?;
-  if arr.is_empty() {
-    return Err(format!("{}: recipe {:?}: duration is an empty array", filename, recipe_id));
+  let op_word = segs[3].as_word().ok_or_else(|| {
+    format!("{}: modify op must be a word", stmt_label())
+  })?;
+  if segs.len() > 4 {
+    return Err(format!(
+      "{}: modify path has trailing segments after the op",
+      stmt_label()
+    ));
   }
-  let mut cases: Vec<(u32, Entity)> = Vec::new();
-  let mut fallback: Option<u32> = None;
-  for (i, tier) in arr.iter().enumerate() {
-    let tier_obj = tier.as_object().ok_or_else(|| {
-      format!(
-        "{}: recipe {:?}: duration[{}]: not an object {{ when?, seconds }}",
-        filename, recipe_id, i
-      )
-    })?;
-    let secs = tier_obj
-      .get("seconds")
-      .and_then(Value::as_u64)
-      .ok_or_else(|| {
-        format!(
-          "{}: recipe {:?}: duration[{}]: 'seconds' missing or not a non-negative integer",
-          filename, recipe_id, i
-        )
-      })? as u32;
-    match tier_obj.get("when") {
-      None => {
-        if i != arr.len() - 1 {
+  let aspect = resolve_aspect_segment(aspect_name, stmt_label)?;
+  let op = match op_word {
+    "add" => StockOp::Add,
+    "sub" => StockOp::Sub,
+    "set" => StockOp::Set,
+    other => {
+      return Err(format!(
+        "{}: modify op {:?} not recognised (use add / sub / set)",
+        stmt_label(),
+        other
+      ));
+    }
+  };
+  Ok((aspect, op))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_output_statement(
+  tail: &[crate::recipe_statement::Segment],
+  value: Option<&crate::recipe_statement::StatementValue>,
+  _type_ids: &BTreeMap<String, u8>,
+  stmt_label: &dyn Fn() -> String,
+  hex_entity: Option<&Entity>,
+  reagent_slots: &mut Vec<Reagent>,
+  reagent_has_root: &mut bool,
+  reagent_has_hex: &mut bool,
+  output_groups: &mut Vec<ProductGroup>,
+  consume_stocks: &mut Vec<ConsumeStock>,
+) -> Result<(), String> {
+  let head = tail
+    .first()
+    .and_then(crate::recipe_statement::Segment::as_word)
+    .ok_or_else(|| format!("{}: output.* needs a sub-bucket", stmt_label()))?;
+  let body = &tail[1..];
+  match head {
+    "destroy" => {
+      let reagent = parse_destroy_card_ref(body, stmt_label)?;
+      match reagent {
+        Reagent::Root => *reagent_has_root = true,
+        Reagent::Hex => *reagent_has_hex = true,
+        Reagent::Slot(_) => reagent_slots.push(reagent),
+      }
+      Ok(())
+    }
+    "create" => {
+      // Path is `output.create.<ref-segments>.<location_id>`. The
+      // location id is the last segment; everything before it is
+      // the card ref.
+      if body.len() < 2 {
+        return Err(format!(
+          "{}: output.create needs `<ref>.<location_id>: <def-key>`",
+          stmt_label()
+        ));
+      }
+      let location_seg = body.last().unwrap();
+      let location_word = location_seg.as_word().ok_or_else(|| {
+        format!("{}: create location id must be a word", stmt_label())
+      })?;
+      let place = match location_word {
+        "inventory" => ProductPlace::Inventory,
+        other => {
           return Err(format!(
-            "{}: recipe {:?}: duration[{}]: tier without 'when' must be the trailing fallback",
-            filename, recipe_id, i
+            "{}: create location {:?} not supported in v1 (only `inventory`)",
+            stmt_label(),
+            other
           ));
         }
-        fallback = Some(secs);
-      }
-      Some(when_val) => {
-        let cond = parse_entity(
-          when_val,
-          type_ids,
-          filename,
-          recipe_id,
-          &format!("duration[{}].when", i),
-        )?;
-        cases.push((secs, cond));
-      }
+      };
+      let ref_segs = &body[..body.len() - 1];
+      let owner = parse_create_owner(ref_segs, stmt_label)?;
+      let def_key = value
+        .and_then(crate::recipe_statement::StatementValue::as_str)
+        .ok_or_else(|| format!("{}: create needs a card-def-key string value", stmt_label()))?;
+      output_groups.push(ProductGroup {
+        target: ProductTarget { place, owner },
+        entities: vec![Entity::Card(def_key.to_string())],
+      });
+      Ok(())
     }
+    "modify" => {
+      let (aspect, op) = parse_modify_target(body, stmt_label)?;
+      let delta_i64 = value
+        .and_then(crate::recipe_statement::StatementValue::as_int)
+        .ok_or_else(|| format!("{}: modify needs an integer value", stmt_label()))?;
+      if delta_i64 < 0 {
+        return Err(format!(
+          "{}: modify value {} is negative (use the `sub` op instead)",
+          stmt_label(),
+          delta_i64
+        ));
+      }
+      let delta = delta_i64 as u8;
+      let max_for_op = match op {
+        StockOp::Add | StockOp::Sub => CONSUME_DELTA_MAX,
+        // `set` clamps at runtime to the slot's `max`; the parser
+        // checks the u2 ceiling — anything beyond is unrepresentable
+        // regardless of the destination slot's declared max.
+        StockOp::Set => CONSUME_DELTA_MAX,
+      };
+      if delta_i64 > max_for_op as i64 || delta_i64 < 1 && !matches!(op, StockOp::Set) {
+        return Err(format!(
+          "{}: modify delta {} out of range (use 1..={} for add/sub; 0..={} for set)",
+          stmt_label(),
+          delta_i64,
+          max_for_op,
+          max_for_op
+        ));
+      }
+      // Predicate-strength gate (preserved from `parse_consume_block`):
+      // a `sub` on the same aspect the `hex` entity predicates on
+      // must not undershoot its `min`.
+      if matches!(op, StockOp::Sub) {
+        if let Some(Entity::Aspect(a, min)) = hex_entity {
+          if *a == aspect && (*min as i64) < delta_i64 {
+            return Err(format!(
+              "{}: modify `hex.aspect.{:?}.sub: {}` exceeds hex entity's min {} — \
+               the recipe could match a tile whose stock can't satisfy the sub",
+              stmt_label(),
+              aspect,
+              delta_i64,
+              min
+            ));
+          }
+        }
+      }
+      consume_stocks.push(ConsumeStock {
+        role: ConsumeRole::Hex,
+        aspect_id: aspect,
+        op,
+        delta,
+      });
+      Ok(())
+    }
+    other => Err(format!(
+      "{}: unknown output sub-bucket {:?} (expected create / destroy / modify)",
+      stmt_label(),
+      other
+    )),
   }
-  let fallback = fallback.ok_or_else(|| {
-    format!(
-      "{}: recipe {:?}: duration: last tier must omit 'when' to act as the fallback",
-      filename, recipe_id
-    )
-  })?;
-  Ok(Duration::Conditional { cases, fallback })
 }
+
+// --- Duration applier ---
+
+#[allow(clippy::too_many_arguments)]
+fn apply_duration_statement(
+  tail: &[crate::recipe_statement::Segment],
+  value: Option<&crate::recipe_statement::StatementValue>,
+  _type_ids: &BTreeMap<String, u8>,
+  stmt_label: &dyn Fn() -> String,
+  default: &mut Option<u32>,
+  tiers: &mut Vec<(u32, Entity)>,
+) -> Result<(), String> {
+  let head = tail
+    .first()
+    .and_then(crate::recipe_statement::Segment::as_word)
+    .ok_or_else(|| format!("{}: duration needs `.default` or `.when.*`", stmt_label()))?;
+  match head {
+    "default" => {
+      if tail.len() != 1 {
+        return Err(format!(
+          "{}: duration.default takes no further path segments",
+          stmt_label()
+        ));
+      }
+      let seconds = value
+        .and_then(crate::recipe_statement::StatementValue::as_int)
+        .ok_or_else(|| format!("{}: duration.default needs an integer", stmt_label()))?;
+      if seconds < 0 {
+        return Err(format!("{}: duration cannot be negative", stmt_label()));
+      }
+      if default.is_some() {
+        return Err(format!(
+          "{}: duration.default declared more than once",
+          stmt_label()
+        ));
+      }
+      *default = Some(seconds as u32);
+      Ok(())
+    }
+    "when" => {
+      // Expect: `duration.when.aspect.<name>.min.<N>: <seconds>`
+      let body = &tail[1..];
+      if body.len() != 4
+        || body[0].as_word() != Some("aspect")
+        || body[2].as_word() != Some("min")
+      {
+        return Err(format!(
+          "{}: duration.when must be `when.aspect.<name>.min.<N>: <seconds>`",
+          stmt_label()
+        ));
+      }
+      let aspect_name = body[1].as_word().ok_or_else(|| {
+        format!("{}: aspect name must be a word", stmt_label())
+      })?;
+      let threshold = body[3].as_index().ok_or_else(|| {
+        format!("{}: when.aspect.{}.min.<N>: <N> must be an integer", stmt_label(), aspect_name)
+      })?;
+      let seconds_i64 = value
+        .and_then(crate::recipe_statement::StatementValue::as_int)
+        .ok_or_else(|| format!("{}: duration.when needs an integer seconds value", stmt_label()))?;
+      if seconds_i64 < 0 {
+        return Err(format!("{}: when seconds cannot be negative", stmt_label()));
+      }
+      let aspect = resolve_aspect_segment(aspect_name, stmt_label)?;
+      tiers.push((seconds_i64 as u32, Entity::Aspect(aspect, threshold as i32)));
+      Ok(())
+    }
+    other => Err(format!(
+      "{}: unknown duration sub-key {:?} (expected default / when)",
+      stmt_label(),
+      other
+    )),
+  }
+}
+
+/// Stock-cap mirror of `packed::ZONE_TILE_STOCK_MAX`. Kept local to
+/// avoid pulling `packed::` into this module's parser path; deltas
+/// above this would never satisfy their own `min` predicate.
+const CONSUME_DELTA_MAX: u8 = 3;
+
 
 #[cfg(test)]
 mod tests {
@@ -1557,7 +1763,216 @@ mod tests {
     // No recipe currently matches `(hex=0, root=axe, slots=[])`, so
     // we expect Ok(0) — "no match" rather than an error.
     let result =
-      match_stack_recipe(0, axe, &[], StackDirection::Up).expect("matcher");
+      match_stack_recipe(0, None, axe, &[], StackDirection::Up).expect("matcher");
     assert_eq!(result, 0, "empty slot_defs should yield no-match, not error");
+  }
+
+  /// `cut_tree` migrated to the flat-statement shape — verify the
+  /// reagent / output / consume / has shapes parse to what
+  /// action_completion expects. Catches regressions where a path
+  /// segment is silently lost (e.g. the `slot.0` destroy ref not
+  /// landing in `reagents.slots`).
+  #[test]
+  fn cut_tree_flat_recipe_parses_to_expected_shape() {
+    let r = find_recipe("cut_tree").expect("registry").expect("cut_tree present");
+
+    // Slot 0 predicates on the corpus+ aspect (stock ≥ 1).
+    assert_eq!(r.slots.len(), 1, "cut_tree has one slot");
+    let corpus_plus = aspect_id("corpus+")
+      .expect("registry")
+      .expect("corpus+ registered");
+    match &r.slots[0] {
+      Entity::Aspect(id, min) => {
+        assert_eq!(*id, corpus_plus, "slot[0] aspect should be corpus+");
+        assert_eq!(*min, 1, "slot[0] aspect.min == 1");
+      }
+      other => panic!("slot[0] expected Aspect(corpus+, 1), got {:?}", other),
+    }
+
+    // Hex predicate: aspect.wood.min: 1.
+    match &r.hex {
+      Some(Entity::Aspect(_, min)) => assert_eq!(*min, 1, "hex.aspect.wood.min == 1"),
+      other => panic!("hex expected Aspect(_, 1), got {:?}", other),
+    }
+
+    // Has predicate: actor's UP-stack contains an axe.
+    assert_eq!(r.has.actor.len(), 1, "has.actor has one entry");
+    match &r.has.actor[0] {
+      Entity::Card(key) => assert_eq!(key, "axe"),
+      other => panic!("has.actor[0] expected Card(\"axe\"), got {:?}", other),
+    }
+
+    // Reagent slots: slot.0 destroys the corpus actor.
+    let has_slot_0 = r.reagents.slots.iter().any(|r| matches!(r, Reagent::Slot(0)));
+    assert!(
+      has_slot_0,
+      "reagents.slots should contain Slot(0) for `output.destroy.slot.0`, got {:?}",
+      r.reagents.slots
+    );
+
+    // Stock mutation: hex.aspect.wood.sub: 1.
+    assert_eq!(r.consume.len(), 1, "cut_tree has one modify clause");
+    let m = &r.consume[0];
+    assert_eq!(m.op, StockOp::Sub);
+    assert_eq!(m.delta, 1);
+
+    // Products: two cards land in the actor's owner's inventory.
+    assert_eq!(r.output.len(), 2, "cut_tree spawns two products");
+    for group in &r.output {
+      assert_eq!(group.target.place, ProductPlace::Inventory);
+      assert_eq!(group.target.owner, ProductOwner::Actor);
+    }
+  }
+
+  /// Sub-aspect hierarchy: `berry` is declared nested under `food`
+  /// in `aspects.json`, so `is_aspect_descendant(berry, food)` must
+  /// be true. This is what makes a `food` predicate accept a tile
+  /// carrying `berry` in its stock — the matcher widening at
+  /// `entity_specificity` / `entity_satisfied_with_stocks` sums
+  /// values across every descendant of the predicate target.
+  #[test]
+  fn berry_is_descendant_of_food() {
+    let berry = aspect_id("berry").expect("registry").expect("berry registered");
+    let food  = aspect_id("food").expect("registry").expect("food registered");
+    assert!(
+      crate::definition_core::is_aspect_descendant(berry, food).expect("ancestor walk"),
+      "berry should descend from food (nested in aspects.json)"
+    );
+    // Self-case is trivially true.
+    assert!(
+      crate::definition_core::is_aspect_descendant(food, food).expect("ancestor walk")
+    );
+    // The reverse direction is false — food is the ancestor, not a
+    // descendant of its own child.
+    assert!(
+      !crate::definition_core::is_aspect_descendant(food, berry).expect("ancestor walk"),
+      "food should NOT descend from berry"
+    );
+    // Cross-family: berry and flora share no ancestor.
+    let flora = aspect_id("flora").expect("registry").expect("flora registered");
+    assert!(
+      !crate::definition_core::is_aspect_descendant(berry, flora).expect("ancestor walk"),
+      "berry should NOT descend from flora"
+    );
+  }
+
+  /// Matcher widening — `entity_specificity` against a def carrying
+  /// `berry: 1` should report a non-zero score for a predicate
+  /// asking `food, min: 1`. This is the behavior that lets recipes
+  /// like "eat food" accept berries without naming them.
+  #[test]
+  fn food_predicate_matches_berry_def() {
+    use crate::definition_core::AspectId;
+    let berry: AspectId = aspect_id("berry").unwrap().unwrap();
+    let food:  AspectId = aspect_id("food").unwrap().unwrap();
+    // Build a fake def carrying berry: 1.
+    let def = CardDefinition {
+      card_type: 0,
+      definition_id: 1,
+      key: "test_berry_basket".to_string(),
+      style: vec![],
+      sprite: None,
+      aspects: vec![(berry, 1)],
+      traits: Vec::new(),
+      flags: 0,
+      stock: Vec::new(),
+      lifecycle_recipe_key: None,
+      lifecycle_duration_ms: None,
+    };
+    let pred = Entity::Aspect(food, 1);
+    let score = entity_specificity(&pred, &def);
+    assert!(
+      score > 0,
+      "Entity::Aspect(food, 1) should match a def carrying berry:1, got score {}",
+      score
+    );
+  }
+
+  /// Stock-aware matcher: a tile def with `pine` in its `stock` array
+  /// and a row-stock value of `pine = 2` should satisfy a `wood, min:
+  /// 1` predicate. Pine descends from wood in `aspects.json`; the
+  /// stock value is the source of truth (no static `aspects` entry on
+  /// this def). Exercises the path that makes `cut_tree` match on a
+  /// forest tile whose pine stock is non-zero.
+  #[test]
+  fn wood_predicate_matches_pine_stock() {
+    use crate::definition_core::{AspectId, StockSlot};
+    let pine: AspectId = aspect_id("pine").unwrap().unwrap();
+    let wood: AspectId = aspect_id("wood").unwrap().unwrap();
+    let def = CardDefinition {
+      card_type: 0,
+      definition_id: 1,
+      key: "test_pine_forest".to_string(),
+      style: vec![],
+      sprite: None,
+      // No static aspect entry — pine is row-mutable stock only,
+      // exactly mirroring forest_1/2/3 in cards/data/tiles/forest.json.
+      aspects: Vec::new(),
+      traits: Vec::new(),
+      flags: 0,
+      stock: vec![StockSlot {
+        aspect_id: pine,
+        max: 3,
+        default: 0,
+        climate_axis: None,
+        climate_axis_min: 0.0,
+        climate_axis_max: 1.0,
+      }],
+      lifecycle_recipe_key: None,
+      lifecycle_duration_ms: None,
+    };
+    let pred = Entity::Aspect(wood, 1);
+    // Stocks=None: must not match (no static aspects).
+    assert_eq!(
+      entity_specificity(&pred, &def),
+      0,
+      "without stock row data, pine-only def shouldn't satisfy wood predicate",
+    );
+    // Stocks=(2, 0): pine row stock = 2, should satisfy wood.min:1.
+    assert!(
+      entity_specificity_with_stocks(&pred, &def, Some((2, 0))) > 0,
+      "pine row stock = 2 should satisfy Entity::Aspect(wood, 1)"
+    );
+    // Stocks=(0, 0): depleted tile must NOT match (depletion semantics).
+    assert_eq!(
+      entity_specificity_with_stocks(&pred, &def, Some((0, 0))),
+      0,
+      "pine row stock = 0 must reject wood.min:1 even though pine slot is declared"
+    );
+  }
+
+  /// Mirror of `wood_predicate_matches_pine_stock` for the direct
+  /// (non-widened) case: a `stone` stock slot satisfies `stone.min:1`.
+  /// This is the case the user reported as "functioning" — without
+  /// sub-aspect widening involvement.
+  #[test]
+  fn stone_predicate_matches_stone_stock() {
+    use crate::definition_core::{AspectId, StockSlot};
+    let stone: AspectId = aspect_id("stone").unwrap().unwrap();
+    let def = CardDefinition {
+      card_type: 0,
+      definition_id: 1,
+      key: "test_stone_mountain".to_string(),
+      style: vec![],
+      sprite: None,
+      aspects: Vec::new(),
+      traits: Vec::new(),
+      flags: 0,
+      stock: vec![StockSlot {
+        aspect_id: stone,
+        max: 3,
+        default: 0,
+        climate_axis: None,
+        climate_axis_min: 0.0,
+        climate_axis_max: 1.0,
+      }],
+      lifecycle_recipe_key: None,
+      lifecycle_duration_ms: None,
+    };
+    let pred = Entity::Aspect(stone, 1);
+    assert!(
+      entity_specificity_with_stocks(&pred, &def, Some((1, 0))) > 0,
+      "stone row stock = 1 should satisfy Entity::Aspect(stone, 1)"
+    );
   }
 }

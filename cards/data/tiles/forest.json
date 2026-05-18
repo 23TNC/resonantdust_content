@@ -1,52 +1,75 @@
 {
   "tile": {
     "forest_1": {
-      "style": [
-        "#799E50",
-        "#0b1426",
-        "#0b1426"
-      ],
+      "style": [ "#799E50", "#0b1426", "#0b1426" ],
       "traits": {
-        "cost": 10
-      }
+        "cost": 10,
+        "humidity_min": 0.55, "humidity_max": 0.95,
+        "temperature_min": 0.20, "temperature_max": 0.70,
+        "elevation_min": 0.30, "elevation_max": 0.75,
+        "rarity": 1.0
+      },
+      "stock": [
+        { "aspect": "flora", "max": 2, "default": 0, "climate_axis": "humidity",
+          "climate_axis_min": 0.40, "climate_axis_max": 0.85 },
+        { "aspect": "pine",  "max": 1, "default": 0, "climate_axis": "humidity",
+          "climate_axis_min": 0.65, "climate_axis_max": 0.80 }
+      ]
     },
     "forest_2": {
-      "style": [
-        "#395C39",
-        "#7fb377",
-        "#0b1426"
-      ],
+      "style": [ "#395C39", "#7fb377", "#0b1426" ],
       "traits": {
-        "cost": 12
-      }
-    },
-    "tree": {
-      "style": [
-        "#395C39",
-        "#3D2818",
-        "#0b1426"
-      ],
-      "aspects": {
-        "wood": 1,
-        "flora": 1
+        "cost": 12,
+        "humidity_min": 0.65, "humidity_max": 0.95,
+        "temperature_min": 0.25, "temperature_max": 0.65,
+        "elevation_min": 0.30, "elevation_max": 0.70,
+        "rarity": 0.7,
+        "cluster_group": 1,
+        "cluster_strength": 0.8
       },
-      "traits": {
-        "cost": 30
-      }
+      "stock": [
+        { "aspect": "pine",  "max": 3, "default": 0, "climate_axis": "humidity",
+          "climate_axis_min": 0.55, "climate_axis_max": 0.75 },
+        { "aspect": "flora", "max": 1, "default": 0, "climate_axis": "humidity",
+          "climate_axis_min": 0.50, "climate_axis_max": 0.80 }
+      ]
     },
-    "rock": {
-      "style": [
-        "#395C39",
-        "#2A2A2A",
-        "#0b1426"
-      ],
+    "forest_3": {
+      "style": [ "#395C39", "#3D2818", "#0b1426" ],
+      "traits": {
+        "cost": 30,
+        "humidity_min": 0.75, "humidity_max": 0.95,
+        "temperature_min": 0.25, "temperature_max": 0.60,
+        "elevation_min": 0.30, "elevation_max": 0.70,
+        "rarity": 0.2,
+        "cluster_group": 1,
+        "cluster_strength": 0.6
+      },
+      "stock": [
+        { "aspect": "pine",  "max": 3, "default": 3, "climate_axis": "humidity",
+          "climate_axis_min": 0.75, "climate_axis_max": 0.95 },
+        { "aspect": "flora", "max": 1, "default": 1, "climate_axis": "humidity" }
+      ]
+    },
+    "forest_4": {
+      "style": [ "#395C39", "#2A2A2A", "#0b1426" ],
       "aspects": {
         "stone": 1,
         "flora": 1
       },
       "traits": {
-        "cost": 30
-      }
+        "cost": 30,
+        "humidity_min": 0.55, "humidity_max": 0.80,
+        "temperature_min": 0.20, "temperature_max": 0.65,
+        "elevation_min": 0.45, "elevation_max": 0.75,
+        "rarity": 0.2
+      },
+      "stock": [
+        { "aspect": "stone", "max": 3, "default": 3, "climate_axis": "elevation",
+          "climate_axis_min": 0.45, "climate_axis_max": 0.75 },
+        { "aspect": "flora", "max": 2, "default": 2, "climate_axis": "humidity",
+          "climate_axis_min": 0.55, "climate_axis_max": 0.80 }
+      ]
     }
   }
 }

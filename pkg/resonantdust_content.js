@@ -178,6 +178,14 @@ export function findRecipeByKey(key) {
 }
 
 /**
+ * @returns {number}
+ */
+export function inventoryLayer() {
+    const ret = wasm.inventoryLayer();
+    return ret;
+}
+
+/**
  * Whether the given `cardType` id resolves to a hex-shaped type
  * (`"hex"` in `cards/types.json`). Throws on registry-build failure.
  * @param {number} type_id
@@ -189,6 +197,16 @@ export function isHexType(type_id) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] !== 0;
+}
+
+/**
+ * @param {number} stacked_state
+ * @param {number} surface
+ * @returns {boolean}
+ */
+export function isStackLayout(stacked_state, surface) {
+    const ret = wasm.isStackLayout(stacked_state, surface);
+    return ret !== 0;
 }
 
 /**
@@ -256,6 +274,9 @@ export function matchMagneticRecipe(root_def, slot_defs, direction, root_above, 
  * recipe matched. Throws on registry-build failure or invalid
  * direction.
  * @param {number} hex_def
+ * @param {number} hex_stock0
+ * @param {number} hex_stock1
+ * @param {number} hex_has_stocks
  * @param {number} root_def
  * @param {Uint16Array} slot_defs
  * @param {number} direction
@@ -265,7 +286,7 @@ export function matchMagneticRecipe(root_def, slot_defs, direction, root_above, 
  * @param {Uint16Array} actor_below
  * @returns {any}
  */
-export function matchStackRecipe(hex_def, root_def, slot_defs, direction, root_above, actor_above, root_below, actor_below) {
+export function matchStackRecipe(hex_def, hex_stock0, hex_stock1, hex_has_stocks, root_def, slot_defs, direction, root_above, actor_above, root_below, actor_below) {
     const ptr0 = passArray16ToWasm0(slot_defs, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray16ToWasm0(root_above, wasm.__wbindgen_malloc);
@@ -276,11 +297,97 @@ export function matchStackRecipe(hex_def, root_def, slot_defs, direction, root_a
     const len3 = WASM_VECTOR_LEN;
     const ptr4 = passArray16ToWasm0(actor_below, wasm.__wbindgen_malloc);
     const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.matchStackRecipe(hex_def, root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+    const ret = wasm.matchStackRecipe(hex_def, hex_stock0, hex_stock1, hex_has_stocks, root_def, ptr0, len0, direction, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @returns {number}
+ */
+export function miniZoneLayer() {
+    const ret = wasm.miniZoneLayer();
+    return ret;
+}
+
+/**
+ * @param {number} card_type
+ * @param {number} def_id
+ * @returns {number}
+ */
+export function packDefinition(card_type, def_id) {
+    const ret = wasm.packDefinition(card_type, def_id);
+    return ret;
+}
+
+/**
+ * @param {number} q
+ * @param {number} r
+ * @returns {number}
+ */
+export function packMacroZone(q, r) {
+    const ret = wasm.packMacroZone(q, r);
+    return ret >>> 0;
+}
+
+/**
+ * @param {number} q
+ * @param {number} r
+ * @param {number} stacked_state
+ * @returns {number}
+ */
+export function packMicroZone(q, r, stacked_state) {
+    const ret = wasm.packMicroZone(q, r, stacked_state);
+    return ret;
+}
+
+/**
+ * @param {number} direction
+ * @returns {number}
+ */
+export function packSlotMicroZone(direction) {
+    const ret = wasm.packSlotMicroZone(direction);
+    return ret;
+}
+
+/**
+ * @param {number} position
+ * @param {number} direction
+ * @param {number} stacked_state
+ * @returns {number}
+ */
+export function packStackMicroZone(position, direction, stacked_state) {
+    const ret = wasm.packStackMicroZone(position, direction, stacked_state);
+    return ret;
+}
+
+/**
+ * @param {bigint} time_ms
+ * @param {number} sequence
+ * @returns {bigint}
+ */
+export function packValidAt(time_ms, sequence) {
+    const ret = wasm.packValidAt(time_ms, sequence);
+    return BigInt.asUintN(64, ret);
+}
+
+/**
+ * @param {number} card_type
+ * @returns {number}
+ */
+export function packZoneDefinition(card_type) {
+    const ret = wasm.packZoneDefinition(card_type);
+    return ret;
+}
+
+/**
+ * @returns {number}
+ */
+export function pocketDimensionLayer() {
+    const ret = wasm.pocketDimensionLayer();
+    return ret;
 }
 
 /**
@@ -334,6 +441,80 @@ export function traitValue(packed_def, name) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
+}
+
+/**
+ * @param {number} v
+ * @returns {any}
+ */
+export function unpackDefinition(v) {
+    const ret = wasm.unpackDefinition(v);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} v
+ * @returns {any}
+ */
+export function unpackMacroZone(v) {
+    const ret = wasm.unpackMacroZone(v);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} v
+ * @returns {any}
+ */
+export function unpackMicroZone(v) {
+    const ret = wasm.unpackMicroZone(v);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} v
+ * @returns {any}
+ */
+export function unpackStackMicroZone(v) {
+    const ret = wasm.unpackStackMicroZone(v);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} v
+ * @returns {number}
+ */
+export function unpackZoneDefinition(v) {
+    const ret = wasm.unpackZoneDefinition(v);
+    return ret;
+}
+
+/**
+ * @param {bigint} packed
+ * @returns {bigint}
+ */
+export function validAtTime(packed) {
+    const ret = wasm.validAtTime(packed);
+    return BigInt.asUintN(64, ret);
+}
+
+/**
+ * @returns {number}
+ */
+export function worldLayer() {
+    const ret = wasm.worldLayer();
+    return ret;
 }
 function __wbg_get_imports() {
     const import0 = {

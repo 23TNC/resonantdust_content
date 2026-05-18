@@ -85,6 +85,37 @@ pub struct TextureScale {
   pub max: f32,
 }
 
+/// Sprite anchor — fractional pivot point used when placing the
+/// texture. `(0, 0)` is top-left, `(1, 1)` bottom-right; `(0.5, 0.5)`
+/// is centred. The renderer multiplies by the rendered sprite size,
+/// so the values are independent of `size` / `scale`.
+///
+/// Different objects pivot differently: a tree wants its trunk near
+/// `(0.5, 0.75)` so the canopy rises *above* the world-hex it sits
+/// on; a small ground item like a flower wants `(0.5, 0.5)` so it
+/// sits centred. Authors set the anchor per-texture in the JSON; the
+/// renderer applies it on every sync (including pool reuse) so a
+/// changed anchor takes effect without spawning a fresh sprite.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextureAnchor {
+  pub x: f32,
+  pub y: f32,
+}
+
+/// Default anchor when `textures/data/**/*.json` omits an `anchor`
+/// block. `(0.5, 0.5)` — geometric centre — is the lowest-surprise
+/// pivot for arbitrary sprites; assets that need to pivot off-centre
+/// (e.g. trees pivoting near the trunk) declare an explicit
+/// `"anchor": { "x": <n>, "y": <n> }` per entry.
+const DEFAULT_ANCHOR: TextureAnchor = TextureAnchor { x: 0.5, y: 0.5 };
+
+/// Default scale envelope when `textures/data/**/*.json` omits a
+/// `scale` block. Means "render at native size, no random variation"
+/// — what most simple assets want without having to spell out a
+/// no-op `{ "min": 1, "max": 1 }`.
+const DEFAULT_SCALE: TextureScale = TextureScale { min: 1.0, max: 1.0 };
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextureDefinition {
@@ -107,6 +138,9 @@ pub struct TextureDefinition {
   pub size: u32,
   /// Render-time random scale envelope.
   pub scale: TextureScale,
+  /// Sprite pivot point. Defaults to `(0.5, 0.75)` when the JSON
+  /// omits `anchor`.
+  pub anchor: TextureAnchor,
 }
 
 struct TextureRegistry {
@@ -334,51 +368,92 @@ fn parse_texture(
     ));
   }
 
-  let scale_val = obj.get("scale").ok_or_else(|| {
-    format!("{}: texture {}: missing 'scale' field", filename, aspect_name)
-  })?;
-  let scale_obj = scale_val.as_object().ok_or_else(|| {
-    format!(
-      "{}: texture {}: 'scale' must be an object",
-      filename, aspect_name
-    )
-  })?;
-  let min = scale_obj
-    .get("min")
-    .and_then(Value::as_f64)
-    .ok_or_else(|| {
+  // `scale` is optional — omitting it means "render at native size,
+  // no random variation" (the `DEFAULT_SCALE` constant). When
+  // present, both `min` and `max` must be finite numbers with
+  // `0 ≤ min ≤ max`.
+  let scale = if let Some(scale_val) = obj.get("scale") {
+    let scale_obj = scale_val.as_object().ok_or_else(|| {
       format!(
-        "{}: texture {}: scale.min missing or not a number",
+        "{}: texture {}: 'scale' must be an object",
+        filename, aspect_name
+      )
+    })?;
+    let min = scale_obj
+      .get("min")
+      .and_then(Value::as_f64)
+      .ok_or_else(|| {
+        format!(
+          "{}: texture {}: scale.min missing or not a number",
+          filename, aspect_name
+        )
+      })? as f32;
+    let max = scale_obj
+      .get("max")
+      .and_then(Value::as_f64)
+      .ok_or_else(|| {
+        format!(
+          "{}: texture {}: scale.max missing or not a number",
+          filename, aspect_name
+        )
+      })? as f32;
+    if !min.is_finite() || !max.is_finite() {
+      return Err(format!(
+        "{}: texture {}: scale.min / scale.max must be finite (got min={}, max={})",
+        filename, aspect_name, min, max
+      ));
+    }
+    if min < 0.0 {
+      return Err(format!(
+        "{}: texture {}: scale.min {} must be non-negative",
+        filename, aspect_name, min
+      ));
+    }
+    if max < min {
+      return Err(format!(
+        "{}: texture {}: scale.max {} less than scale.min {}",
+        filename, aspect_name, max, min
+      ));
+    }
+    TextureScale { min, max }
+  } else {
+    DEFAULT_SCALE
+  };
+
+  // `anchor` is optional — defaults to `DEFAULT_ANCHOR` to preserve
+  // legacy behaviour. When present, both `x` and `y` must be finite
+  // numbers; they may sit outside `[0, 1]` (placing the pivot
+  // outside the sprite's bounds is legitimate for e.g. mast-tall
+  // textures whose visual centre lies above the asset frame).
+  let anchor = if let Some(anchor_val) = obj.get("anchor") {
+    let anchor_obj = anchor_val.as_object().ok_or_else(|| {
+      format!(
+        "{}: texture {}: 'anchor' must be an object {{ \"x\": <num>, \"y\": <num> }}",
+        filename, aspect_name
+      )
+    })?;
+    let ax = anchor_obj.get("x").and_then(Value::as_f64).ok_or_else(|| {
+      format!(
+        "{}: texture {}: anchor.x missing or not a number",
         filename, aspect_name
       )
     })? as f32;
-  let max = scale_obj
-    .get("max")
-    .and_then(Value::as_f64)
-    .ok_or_else(|| {
+    let ay = anchor_obj.get("y").and_then(Value::as_f64).ok_or_else(|| {
       format!(
-        "{}: texture {}: scale.max missing or not a number",
+        "{}: texture {}: anchor.y missing or not a number",
         filename, aspect_name
       )
     })? as f32;
-  if !min.is_finite() || !max.is_finite() {
-    return Err(format!(
-      "{}: texture {}: scale.min / scale.max must be finite (got min={}, max={})",
-      filename, aspect_name, min, max
-    ));
-  }
-  if min < 0.0 {
-    return Err(format!(
-      "{}: texture {}: scale.min {} must be non-negative",
-      filename, aspect_name, min
-    ));
-  }
-  if max < min {
-    return Err(format!(
-      "{}: texture {}: scale.max {} less than scale.min {}",
-      filename, aspect_name, max, min
-    ));
-  }
+    if !ax.is_finite() || !ay.is_finite() {
+      return Err(format!(
+        "{}: texture {}: anchor.x / anchor.y must be finite (got x={}, y={})",
+        filename, aspect_name, ax, ay
+      ));
+    }
+    TextureAnchor { x: ax, y: ay }
+  } else {
+    DEFAULT_ANCHOR
+  };
 
   Ok(TextureDefinition {
     id,
@@ -387,7 +462,8 @@ fn parse_texture(
     aspect_name: aspect_name.to_string(),
     object,
     size: size_u64 as u32,
-    scale: TextureScale { min, max },
+    scale,
+    anchor,
   })
 }
 

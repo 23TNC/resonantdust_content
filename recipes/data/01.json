@@ -1,101 +1,99 @@
 {
-  "stack": {
-    "up": {
-      "triple_corpus": {
-        "slots": ["corpus", "corpus", "corpus"],
-        "reagents": { "slots": [0] },
-        "duration": 10,
-        "style": "rtl"
-      },
-      "dread_remover": {
-        "slots": ["dread", "dread"],
-        "reagents": { "slots": [0, 1] },
-        "duration": 10,
-        "style": "ltr"
-      },
-      "corpus_up": {
-        "slots": ["corpus", "corpus"],
-        "reagents": { "slots": [0] },
-        "output": { "inventory": { "root": ["corpus-"] } },
-        "duration": 10,
-        "style": "rtl"
-      },
-      "despair_failure": {
-        "root": "despair",
-        "reagents": { "roles": ["root"] },
-        "output": { "inventory": { "root": ["dread"] } },
-        "duration": 10,
-        "style": "ltr"
-      },
-      "strike_failure": {
-        "root": "strike",
-        "reagents": { "roles": ["root"] },
-        "output": { "inventory": { "root": ["dread"] } },
-        "duration": 10,
-        "style": "ltr"
-      }
-    },
-    "down": {
-      "corpus_down_aspect": {
-        "slots": [
-          { "aspect": "corpus", "min": 1 },
-          "corpus"
-        ],
-        "reagents": { "slots": [0] },
-        "duration": 10,
-        "style": "rtl"
-      },
-      "corpus_down": {
-        "slots": ["corpus", "corpus"],
-        "reagents": { "slots": [0] },
-        "output": { "inventory": { "root": ["corpus"] } },
-        "duration": 10,
-        "style": "rtl"
-      }
-    }
+  "stack.up": {
+    "triple_corpus": [
+      "input.slot.0.def_id: corpus",
+      "input.slot.1.def_id: corpus",
+      "input.slot.2.def_id: corpus",
+      "output.destroy.slot.0",
+      "duration.default: 10",
+      "style.default: rtl"
+    ],
+    "dread_remover": [
+      "input.slot.0.def_id: dread",
+      "input.slot.1.def_id: dread",
+      "output.destroy.slot.0",
+      "output.destroy.slot.1",
+      "duration.default: 10",
+      "style.default: ltr"
+    ],
+    "corpus_up": [
+      "input.slot.0.def_id: corpus",
+      "input.slot.1.def_id: corpus",
+      "output.destroy.slot.0",
+      "output.create.root.inventory: corpus-",
+      "duration.default: 10",
+      "style.default: rtl"
+    ],
+    "despair_failure": [
+      "input.root.def_id: despair",
+      "output.destroy.root",
+      "output.create.root.inventory: dread",
+      "duration.default: 10",
+      "style.default: ltr"
+    ],
+    "strike_failure": [
+      "input.root.def_id: strike",
+      "output.destroy.root",
+      "output.create.root.inventory: dread",
+      "duration.default: 10",
+      "style.default: ltr"
+    ]
+  },
+
+  "stack.down": {
+    "corpus_down": [
+      "input.slot.0.def_id: corpus",
+      "input.slot.1.def_id: corpus",
+      "output.destroy.slot.0",
+      "output.create.root.inventory: corpus",
+      "duration.default: 10",
+      "style.default: rtl"
+    ]
   },
 
   "on_create": {
-    "self": {
-      "corpus-": {
-        "root": "corpus-",
-        "reagents": { "roles": ["root"] },
-        "output": { "inventory": { "actor": ["corpus"] } },
-        "duration": 30,
-        "style": "rtl"
-      },
-      "fleeting": {
-        "root": { "aspect": "fleeting", "min": 1 },
-        "reagents": { "roles": ["root"] },
-        "duration": [
-          { "when": { "aspect": "fleeting", "min": 4 }, "seconds": 20 },
-          { "when": { "aspect": "fleeting", "min": 3 }, "seconds": 15 },
-          { "when": { "aspect": "fleeting", "min": 2 }, "seconds": 10 },
-          { "seconds": 5 }
-        ],
-        "style": "rtl"
-      }
-    }
+    "corpus-": [
+      "input.root.def_id: corpus-",
+      "output.destroy.root",
+      "output.create.actor.inventory: corpus",
+      "duration.default: 30",
+      "style.default: rtl"
+    ],
+    "fleeting": [
+      "input.root.aspect.fleeting.min: 1",
+      "output.destroy.root",
+      "duration.when.aspect.fleeting.min.4: 20",
+      "duration.when.aspect.fleeting.min.3: 15",
+      "duration.when.aspect.fleeting.min.2: 10",
+      "duration.default: 5",
+      "style.default: rtl"
+    ]
   },
 
-  "magnetic": {
-    "up": {
-      "despair_success": {
-        "root": "despair",
-        "slots": ["dread"],
-        "reagents": { "slots": [0], "roles": ["root"] },
-        "output": { "inventory": { "root": ["corpus"] } },
-        "duration": 10,
-        "style": "ltr"
-      },
-      "strike_success": {
-        "root": "strike",
-        "slots": ["corpus", "corpus", "corpus"],
-        "reagents": { "slots": [0, 1, 2], "roles": ["root"] },
-        "output": { "inventory": { "root": ["corpus-", "corpus-", "corpus-"] } },
-        "duration": 10,
-        "style": "ltr"
-      }
-    }
+  "magnetic.up": {
+    "despair_success": [
+      "input.root.def_id: despair",
+      "input.slot.0.def_id: dread",
+      "output.destroy.slot.0",
+      "output.destroy.root",
+      "output.create.root.inventory: corpus",
+      "duration.default: 10",
+      "style.default: ltr"
+    ],
+    "strike_success": [
+      "input.root.def_id: strike",
+      "input.slot.0.def_id: corpus",
+      "input.slot.1.def_id: corpus",
+      "input.slot.2.def_id: corpus",
+      "output.destroy.slot.0",
+      "output.destroy.slot.1",
+      "output.destroy.slot.2",
+      "output.destroy.root",
+      "output.create.root.inventory: corpus-",
+      "output.create.root.inventory: corpus-",
+      "output.create.root.inventory: corpus-",
+      "duration.default: 10",
+      "style.default: ltr"
+    ]
   }
 }

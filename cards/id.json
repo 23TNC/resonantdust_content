@@ -6,7 +6,7 @@
   "faculty": {
     "corpus": 1,
     "corpus-": 2,
-    "corpus+": 3,
+    "corpus++": 3,
     "aether": 4,
     "aether-": 5,
     "aether+": 6,
@@ -30,9 +30,21 @@
     "human": 1
   },
   "tile": {
-    "forest_1": 1,
-    "forest_2": 2,
-    "tree": 3,
-    "rock": 4
+    "desert_1": 1,
+    "desert_2": 2,
+    "desert_3": 3,
+    "desert_4": 4,
+    "forest_1": 5,
+    "forest_2": 6,
+    "forest_3": 7,
+    "forest_4": 8,
+    "mountain_1": 9,
+    "mountain_2": 10,
+    "mountain_3": 11,
+    "mountain_4": 12,
+    "plains_1": 13,
+    "plains_2": 14,
+    "plains_3": 15,
+    "plains_4": 16
   }
 }

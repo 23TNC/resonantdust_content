@@ -1,23 +1,25 @@
 {
-  "stack": {
-    "up": {
-      "cut_tree": {
-        "hex": "tree",
-        "slots": ["corpus"],
-        "has": { "actor": ["axe"] },
-        "reagents": { "slots": [0], "roles": ["hex"] },
-        "output": { "inventory": { "actor": ["corpus-", "log"] } },
-        "duration": 10,
-        "style": "rtl"
-      },
-      "break_rock": {
-        "hex": "rock",
-        "slots": ["corpus"],
-        "reagents": { "slots": [0], "roles": ["hex"] },
-        "output": { "inventory": { "actor": ["corpus-", "stone"] } },
-        "duration": 10,
-        "style": "rtl"
-      }
-    }
+  "stack.up": {
+    "cut_tree": [
+      "input.hex.aspect.wood.min: 1",
+      "input.slot.0.aspect.corpus+.min: 1",
+      "input.has.def_id: axe",
+      "output.destroy.slot.0",
+      "output.modify.hex.aspect.wood.sub: 1",
+      "output.create.slot.0.owner.inventory: corpus-",
+      "output.create.slot.0.owner.inventory: log",
+      "duration.default: 10",
+      "style.default: rtl"
+    ],
+    "break_rock": [
+      "input.hex.aspect.stone.min: 1",
+      "input.slot.0.def_id: corpus",
+      "output.destroy.slot.0",
+      "output.modify.hex.aspect.stone.sub: 1",
+      "output.create.slot.0.owner.inventory: corpus-",
+      "output.create.slot.0.owner.inventory: stone",
+      "duration.default: 10",
+      "style.default: rtl"
+    ]
   }
 }

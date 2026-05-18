@@ -23,8 +23,7 @@
       "description": {
         "simple": "A heavy pickaxe — useful for breaking stone."
       }
-    },
-    "label": "stone"
+    }
   },
   "event": {
     "despair": {
@@ -38,8 +37,7 @@
       "description": {
         "simple": "A burst of effort pinned to the world. Channel corpus into it to see it through."
       }
-    },
-    "label": "strike"
+    }
   },
   "faculty": {
     "aether": {
@@ -114,7 +112,9 @@
         "simple": "Skill spent. Will recover in time."
       }
     },
-    "label": "sollertia-"
+    "corpus++": {
+      "label": "corpus++"
+    }
   },
   "revery": {
     "dread": {
@@ -122,8 +122,7 @@
       "description": {
         "simple": "A clinging fear that resists being put down."
       }
-    },
-    "label": "dread"
+    }
   },
   "soul": {
     "human": {
@@ -131,8 +130,7 @@
       "description": {
         "simple": "An ordinary mortal — adaptable, balanced across every faculty."
       }
-    },
-    "label": "human"
+    }
   },
   "tile": {
     "forest_1": {
@@ -159,6 +157,47 @@
         "simple": "A standing tree. Cut it down with an axe for logs."
       }
     },
-    "label": "tree"
+    "desert_1": {
+      "label": "desert_1"
+    },
+    "desert_2": {
+      "label": "desert_2"
+    },
+    "desert_3": {
+      "label": "desert_3"
+    },
+    "desert_4": {
+      "label": "desert_4"
+    },
+    "forest_3": {
+      "label": "forest_3"
+    },
+    "forest_4": {
+      "label": "forest_4"
+    },
+    "mountain_1": {
+      "label": "mountain_1"
+    },
+    "mountain_2": {
+      "label": "mountain_2"
+    },
+    "mountain_3": {
+      "label": "mountain_3"
+    },
+    "mountain_4": {
+      "label": "mountain_4"
+    },
+    "plains_1": {
+      "label": "plains_1"
+    },
+    "plains_2": {
+      "label": "plains_2"
+    },
+    "plains_3": {
+      "label": "plains_3"
+    },
+    "plains_4": {
+      "label": "plains_4"
+    }
   }
 }
