@@ -1,77 +1,77 @@
 {
   "triple_corpus": {
     "input": [
-      "up.slot.0.def_id: corpus",
-      "up.slot.1.def_id: corpus",
-      "up.slot.2.def_id: corpus"
+      "use.slot.1.0.def_id: corpus",
+      "claim.slot.1.1.def_id: corpus",
+      "claim.slot.1.2.def_id: corpus"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: rtl",
-      "up.slot.0.destroy"
+      "slot.1.0.style.set: rtl",
+      "slot.1.0.destroy"
     ]
   },
 
   "dread_remover": {
     "input": [
-      "up.slot.0.def_id: dread",
-      "up.slot.1.def_id: dread"
+      "use.slot.1.0.def_id: dread",
+      "claim.slot.1.1.def_id: dread"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: ltr",
-      "up.slot.0.destroy",
-      "up.slot.1.destroy"
+      "slot.1.0.style.set: ltr",
+      "slot.1.0.destroy",
+      "slot.1.1.destroy"
     ]
   },
 
-  "corpus_up": {
+  "corpus_b.1": {
     "input": [
-      "up.slot.0.def_id: corpus",
-      "up.slot.1.def_id: corpus"
+      "use.slot.1.0.def_id: corpus",
+      "claim.slot.1.1.def_id: corpus"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: rtl",
-      "up.slot.0.destroy",
-      "up.slot.0.owner.inventory.create: corpus-"
+      "slot.1.0.style.set: ltr",
+      "slot.1.0.destroy",
+      "slot.1.0.owner.inventory.create: corpus-"
     ]
   },
 
-  "corpus_down": {
+  "corpus_b.2": {
     "input": [
-      "down.slot.0.def_id: corpus",
-      "down.slot.1.def_id: corpus"
+      "use.slot.2.0.def_id: corpus",
+      "claim.slot.2.1.def_id: corpus"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: rtl",
-      "down.slot.0.destroy",
-      "down.slot.0.owner.inventory.create: corpus"
+      "slot.2.0.style.set: ltr",
+      "slot.2.0.destroy",
+      "slot.2.0.owner.inventory.create: corpus"
     ]
   },
 
   "despair_success": {
     "input": [
-      "root.def_id: despair",
-      "up.slot.0.def_id: dread"
+      "use.root.def_id: despair",
+      "claim.slot.1.0.def_id: dread"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: ltr",
-      "up.slot.0.destroy",
+      "slot.1.0.style.set: ltr",
+      "slot.1.0.destroy",
       "root.destroy",
-      "up.slot.0.owner.inventory.create: corpus"
+      "slot.1.0.owner.inventory.create: corpus"
     ]
   },
 
   "despair_failure": {
     "input": [
-      "root.def_id: despair"
+      "use.root.def_id: despair"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: ltr",
+      "root.style.set: ltr",
       "root.destroy",
       "root.owner.inventory.create: dread"
     ]
@@ -79,31 +79,31 @@
 
   "strike_success": {
     "input": [
-      "root.def_id: strike",
-      "up.slot.0.def_id: corpus",
-      "up.slot.1.def_id: corpus",
-      "up.slot.2.def_id: corpus"
+      "use.root.def_id: strike",
+      "claim.slot.1.0.def_id: corpus",
+      "claim.slot.1.1.def_id: corpus",
+      "claim.slot.1.2.def_id: corpus"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: ltr",
-      "up.slot.0.destroy",
-      "up.slot.1.destroy",
-      "up.slot.2.destroy",
+      "root.style.set: ltr",
+      "slot.1.0.destroy",
+      "slot.1.1.destroy",
+      "slot.1.2.destroy",
       "root.destroy",
-      "up.slot.0.owner.inventory.create: corpus-",
-      "up.slot.0.owner.inventory.create: corpus-",
-      "up.slot.0.owner.inventory.create: corpus-"
+      "slot.1.0.owner.inventory.create: corpus-",
+      "slot.1.0.owner.inventory.create: corpus-",
+      "slot.1.0.owner.inventory.create: corpus-"
     ]
   },
 
   "strike_failure": {
     "input": [
-      "root.def_id: strike"
+      "use.root.def_id: strike"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: ltr",
+      "root.style.set: ltr",
       "root.destroy",
       "root.owner.inventory.create: dread"
     ]
@@ -111,11 +111,11 @@
 
   "corpus-": {
     "input": [
-      "root.def_id: corpus-"
+      "use.root.def_id: corpus-"
     ],
     "output": [
       "sys.duration.set: 30",
-      "sys.style.set: rtl",
+      "root.style.set: ltr",
       "root.destroy",
       "root.owner.inventory.create: corpus"
     ]
@@ -123,7 +123,7 @@
 
   "fleeting": {
     "input": [
-      "root.aspect.fleeting.min: 1"
+      "borrow.root.aspect.fleeting.min: 1"
     ],
     "output": [
       "var.0.set: root.aspect.fleeting",
@@ -131,7 +131,7 @@
       "when.var.0.ge.2.sys.duration.set: 10",
       "when.var.0.ge.3.sys.duration.set: 15",
       "when.var.0.ge.4.sys.duration.set: 20",
-      "sys.style.set: rtl",
+      "root.style.set: rtl",
       "root.destroy"
     ]
   }

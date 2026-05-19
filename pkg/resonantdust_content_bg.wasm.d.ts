@@ -1,8 +1,12 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const allBlueprints: () => [number, number, number];
 export const allTextures: () => [number, number, number];
+export const aspectIdByName: (a: number, b: number) => [number, number, number];
 export const aspectInfo: (a: number) => [number, number, number];
+export const blueprintById: (a: number) => [number, number, number];
+export const blueprintByKey: (a: number, b: number) => [number, number, number];
 export const cardFlagBit: (a: number, b: number) => [number, number, number];
 export const cardFlagFieldValue: (a: number, b: number, c: number) => [number, number, number];
 export const cardLabel: (a: number, b: number, c: number) => [number, number, number, number];
@@ -24,6 +28,7 @@ export const pocketDimensionLayer: () => number;
 export const recipeById: (a: number) => [number, number, number];
 export const recipeByKey: (a: number, b: number) => [number, number, number];
 export const recipesAll: () => [number, number, number];
+export const starterBlueprintsForSoul: (a: number, b: number) => [number, number, number, number];
 export const starterPacksForSoul: (a: number, b: number) => [number, number, number];
 export const traitValue: (a: number, b: number, c: number) => [number, number, number];
 export const unpackDefinition: (a: number) => [number, number, number];

@@ -1,6 +1,24 @@
 /* @ts-self-types="./resonantdust_content.d.ts" */
 
 /**
+ * Every registered blueprint in stable-id order. Returns an array of
+ * `Blueprint` objects; empty when no blueprints are declared. Throws
+ * on registry-build failure.
+ *
+ * Called by the wrench panel to enumerate the catalog for display —
+ * each entry's `cardPackedDefinition` resolves directly through
+ * `decodeDefinition` / `cardLabel` for the card-side visuals.
+ * @returns {any}
+ */
+export function allBlueprints() {
+    const ret = wasm.allBlueprints();
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Every registered texture definition, in stable-id order. Each entry
  * carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
  * `size`, and `scale: { min, max }`. Returns an empty array when no
@@ -19,6 +37,29 @@ export function allTextures() {
 }
 
 /**
+ * Look up an aspect's numeric id by its declared name (the JSON
+ * key under `cards/aspects.json` — `"wood"`, `"corpus+"`, etc.).
+ * Returns `undefined` when the name isn't registered. Throws on
+ * registry-build failure.
+ *
+ * Used by the client recipe matcher to evaluate
+ * `<path>.aspect.<name>.min: <N>` predicates: the name appears in
+ * the recipe segments, but card defs store aspect entries keyed by
+ * numeric id — this helper bridges the two.
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function aspectIdByName(name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.aspectIdByName(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === 0xFFFFFF ? undefined : ret[0];
+}
+
+/**
  * Look up an aspect by id. Returns the `Aspect` object (with `id`,
  * `name`, `description`, `icon`, `group` fields) or `null` for
  * `ASPECT_NONE` (id 0) and unknown ids. Throws on registry-build
@@ -28,6 +69,39 @@ export function allTextures() {
  */
 export function aspectInfo(id) {
     const ret = wasm.aspectInfo(id);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Look up a blueprint by its stable `u16` id. Returns the full
+ * Blueprint object (`id`, `key`, `cardKey`, `cardPackedDefinition`)
+ * or `null` if the id isn't registered. Throws on registry-build
+ * failure.
+ * @param {number} id
+ * @returns {any}
+ */
+export function blueprintById(id) {
+    const ret = wasm.blueprintById(id);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Look up a blueprint by its source-key (e.g. `"nd_furnace"`).
+ * Returns the full Blueprint object or `null` if no blueprint with
+ * that key is registered. Throws on registry-build failure.
+ * @param {string} key
+ * @returns {any}
+ */
+export function blueprintByKey(key) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.blueprintByKey(ptr0, len0);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -339,6 +413,28 @@ export function recipesAll() {
 }
 
 /**
+ * Stable blueprint ids granted to a player on creating a character
+ * of the given soul. Sourced from the soul's `"blueprints"` array in
+ * `starter_packs/data/*.json`. Returns an empty array for souls that
+ * don't declare any. Throws on registry-build failure.
+ *
+ * Each id resolves to a full `Blueprint` via `blueprintById`.
+ * @param {string} soul
+ * @returns {Uint16Array}
+ */
+export function starterBlueprintsForSoul(soul) {
+    const ptr0 = passStringToWasm0(soul, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starterBlueprintsForSoul(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU16FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
+    return v2;
+}
+
+/**
  * All starter packs registered for a given soul card key (e.g.
  * `"human"`). Returns an array of `StarterPack` objects (`id`,
  * `soul`, `packId`, `contents: [{cardKey, packedDefinition,
@@ -526,6 +622,11 @@ function __wbg_get_imports() {
     };
 }
 
+function getArrayU16FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
+}
+
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {
     if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
@@ -536,6 +637,14 @@ function getDataViewMemory0() {
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
+}
+
+let cachedUint16ArrayMemory0 = null;
+function getUint16ArrayMemory0() {
+    if (cachedUint16ArrayMemory0 === null || cachedUint16ArrayMemory0.byteLength === 0) {
+        cachedUint16ArrayMemory0 = new Uint16Array(wasm.memory.buffer);
+    }
+    return cachedUint16ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -624,6 +733,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedUint16ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

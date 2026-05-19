@@ -1,0 +1,9 @@
+{
+  "_comment": "Blueprint cards — one per content/blueprints/data/ entry. Each card is the renderable face of a discovered blueprint; the discovery bit lives on SoulPrivate.blueprints_0 (bit position = blueprint id - 1).",
+  "blueprint": {
+    "blueprint_nd_furnace": {
+      "style": [ "#0A3D73", "#0B4F8A", "#E6F1FF" ],
+      "sprite": "128_blueprint_nd_furnace"
+    }
+  }
+}

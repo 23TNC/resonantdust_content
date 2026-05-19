@@ -14,6 +14,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::definition_core::{
   aspect as core_aspect,
+  aspect_id as core_aspect_id,
   card_locale_path as core_card_locale_path,
   decode_definition as core_decode_definition,
   find_packed_by_key as core_find_packed_by_key,
@@ -28,7 +29,13 @@ use crate::recipe_core::{
   recipes_by_priority as core_recipes_by_priority,
 };
 use crate::starter_pack_core::{
+  starter_blueprints_for_soul as core_starter_blueprints_for_soul,
   starter_packs_for_soul as core_starter_packs_for_soul,
+};
+use crate::blueprint_core::{
+  blueprint as core_blueprint,
+  blueprints_all as core_blueprints_all,
+  find_blueprint as core_find_blueprint,
 };
 use crate::texture_core::textures as core_textures;
 
@@ -44,6 +51,20 @@ pub fn aspect_info(id: u8) -> Result<JsValue, JsValue> {
       .map_err(|e| JsValue::from_str(&e.to_string())),
     None => Ok(JsValue::NULL),
   }
+}
+
+/// Look up an aspect's numeric id by its declared name (the JSON
+/// key under `cards/aspects.json` — `"wood"`, `"corpus+"`, etc.).
+/// Returns `undefined` when the name isn't registered. Throws on
+/// registry-build failure.
+///
+/// Used by the client recipe matcher to evaluate
+/// `<path>.aspect.<name>.min: <N>` predicates: the name appears in
+/// the recipe segments, but card defs store aspect entries keyed by
+/// numeric id — this helper bridges the two.
+#[wasm_bindgen(js_name = aspectIdByName)]
+pub fn aspect_id_by_name(name: &str) -> Result<Option<u8>, JsValue> {
+  core_aspect_id(name).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Decode a packed `(cardType:u4 | definitionId:u12)` value into a
@@ -252,6 +273,57 @@ pub fn recipes_all() -> Result<JsValue, JsValue> {
 pub fn starter_packs_for_soul(soul: &str) -> Result<JsValue, JsValue> {
   let packs = core_starter_packs_for_soul(soul).map_err(|e| JsValue::from_str(&e))?;
   serde_wasm_bindgen::to_value(&packs).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Stable blueprint ids granted to a player on creating a character
+/// of the given soul. Sourced from the soul's `"blueprints"` array in
+/// `starter_packs/data/*.json`. Returns an empty array for souls that
+/// don't declare any. Throws on registry-build failure.
+///
+/// Each id resolves to a full `Blueprint` via `blueprintById`.
+#[wasm_bindgen(js_name = starterBlueprintsForSoul)]
+pub fn starter_blueprints_for_soul(soul: &str) -> Result<Vec<u16>, JsValue> {
+  core_starter_blueprints_for_soul(soul).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Look up a blueprint by its stable `u16` id. Returns the full
+/// Blueprint object (`id`, `key`, `cardKey`, `cardPackedDefinition`)
+/// or `null` if the id isn't registered. Throws on registry-build
+/// failure.
+#[wasm_bindgen(js_name = blueprintById)]
+pub fn blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
+  let opt = core_blueprint(id).map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(bp) => serde_wasm_bindgen::to_value(bp)
+      .map_err(|e| JsValue::from_str(&e.to_string())),
+    None => Ok(JsValue::NULL),
+  }
+}
+
+/// Look up a blueprint by its source-key (e.g. `"nd_furnace"`).
+/// Returns the full Blueprint object or `null` if no blueprint with
+/// that key is registered. Throws on registry-build failure.
+#[wasm_bindgen(js_name = blueprintByKey)]
+pub fn blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
+  let opt = core_find_blueprint(key).map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(bp) => serde_wasm_bindgen::to_value(bp)
+      .map_err(|e| JsValue::from_str(&e.to_string())),
+    None => Ok(JsValue::NULL),
+  }
+}
+
+/// Every registered blueprint in stable-id order. Returns an array of
+/// `Blueprint` objects; empty when no blueprints are declared. Throws
+/// on registry-build failure.
+///
+/// Called by the wrench panel to enumerate the catalog for display —
+/// each entry's `cardPackedDefinition` resolves directly through
+/// `decodeDefinition` / `cardLabel` for the card-side visuals.
+#[wasm_bindgen(js_name = allBlueprints)]
+pub fn all_blueprints() -> Result<JsValue, JsValue> {
+  let bps = core_blueprints_all().map_err(|e| JsValue::from_str(&e))?;
+  serde_wasm_bindgen::to_value(&bps).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Every registered texture definition, in stable-id order. Each entry

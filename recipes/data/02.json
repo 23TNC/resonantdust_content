@@ -1,32 +1,50 @@
 {
   "cut_tree": {
     "input": [
-      "hex.aspect.wood.min: 1",
-      "up.slot.0.aspect.corpus+.min: 1",
-      "up.slot.0.owner.up.slot.0.def_id: axe"
+      "use.slot.0.0.aspect.wood.min: 1",
+      "claim.slot.1.0.aspect.corpus+.min: 1",
+      "share.slot.1.0.owner.slot.1.0.def_id: axe"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: rtl",
-      "up.slot.0.destroy",
-      "hex.aspect.wood.sub: 1",
-      "up.slot.0.owner.inventory.create: corpus-",
-      "up.slot.0.owner.inventory.create: log"
+      "slot.1.0.style.set: ltr",
+      "slot.1.0.destroy",
+      "slot.0.0.aspect.wood.sub: 1",
+      "slot.1.0.owner.inventory.create: corpus-",
+      "slot.1.0.owner.inventory.create: log"
     ]
   },
-
-  "break_rock": {
+  "stick": {
     "input": [
-      "hex.aspect.stone.min: 1",
-      "up.slot.0.def_id: corpus"
+      "use.slot.2.0.aspect.wood.min: 2",
+      "claim.slot.2.1.aspect.corpus+.min: 1",
+      "share.slot.2.0.owner.slot.1.0.def_id: axe"
     ],
     "output": [
       "sys.duration.set: 10",
-      "sys.style.set: rtl",
-      "up.slot.0.destroy",
-      "hex.aspect.stone.sub: 1",
-      "up.slot.0.owner.inventory.create: corpus-",
-      "up.slot.0.owner.inventory.create: stone"
+      "slot.2.1.style.set: ltr",
+      "slot.2.0.destroy",
+      "slot.2.1.destroy",
+      "slot.2.1.owner.inventory.create: corpus-",
+      "var.0.set: slot.2.0.aspect.wood",
+      "when.var.0.gt.2.slot.2.1.owner.inventory.create: stick",
+      "slot.2.1.owner.inventory.create: stick",
+      "slot.2.1.owner.inventory.create: stick"
+    ]
+  },
+  "break_rock": {
+    "input": [
+      "use.slot.0.0.aspect.stone.min: 1",
+      "claim.slot.1.0.def_id: corpus",
+      "share.slot.1.0.owner.slot.1.0.def_id: pickaxe"
+    ],
+    "output": [
+      "sys.duration.set: 10",
+      "slot.1.0.style.set: ltr",
+      "slot.1.0.destroy",
+      "slot.0.0.aspect.stone.sub: 1",
+      "slot.1.0.owner.inventory.create: corpus-",
+      "slot.1.0.owner.inventory.create: stone"
     ]
   }
 }

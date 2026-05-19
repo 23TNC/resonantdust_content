@@ -288,6 +288,12 @@ fn build_textures() -> Result<TextureRegistry, String> {
       })?;
 
       for (aspect_name, value) in textures_obj {
+        // Skip JSON-doc convention keys (`_comment`, etc.) — same
+        // rule used at the top-level type loop above and by the
+        // definition/recipe parsers.
+        if aspect_name.starts_with('_') {
+          continue;
+        }
         let stable_id = stable_ids
           .get(&(type_name.clone(), aspect_name.clone()))
           .copied()

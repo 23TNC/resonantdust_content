@@ -3,6 +3,11 @@
     "log":   {
       "style": [ "#8B5E3C", "#ecd6aa", "#0b1426" ],
       "sprite": "128_requisite_1",
+      "aspects": { "fuel": 2, "wood": 2 }
+    },
+    "stick":   {
+      "style": [ "#8B5E3C", "#ecd6aa", "#0b1426" ],
+      "sprite": "128_requisite_14",
       "aspects": { "fuel": 1, "wood": 1 }
     },
     "stone": {

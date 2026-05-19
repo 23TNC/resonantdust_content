@@ -183,17 +183,22 @@ pub fn is_stack_layout(state: StackedState, surface: u8) -> bool {
 /// Direction values within the stack layout. Two bits — values 0, 1,
 /// 2 are valid; value 3 is reserved.
 ///
-/// - `0 = up / top` — child chains stacked above root.
-/// - `1 = down / bottom` — child chains stacked below root.
-/// - `2 = hex` — child chains stacked into the hex branch.
+/// The values match the recipe-grammar **branch number** convention
+/// from `recipe_tape.rs`: a card placed in `slot.<N>.<index>` of its
+/// chain root is packed with direction byte `N`.
+///
+/// - `0` = `STACK_DIR_HEX` — the tile branch (visually beneath root;
+///   `slot.0.X` in recipe grammar).
+/// - `1` = `STACK_DIR_UP` — top branch (`slot.1.X`).
+/// - `2` = `STACK_DIR_DOWN` — bottom branch (`slot.2.X`).
 ///
 /// The three branches are structurally identical (parent-pointer chain
 /// in `Slot` state, root-anchored chain in `OnRoot` state). The
 /// direction value only tells client renderers which side of root to
 /// visually attach the chain to.
-pub const STACK_DIR_UP: u8 = 0;
-pub const STACK_DIR_DOWN: u8 = 1;
-pub const STACK_DIR_HEX: u8 = 2;
+pub const STACK_DIR_HEX: u8 = 0;
+pub const STACK_DIR_UP: u8 = 1;
+pub const STACK_DIR_DOWN: u8 = 2;
 
 /// Pack `(position, direction, state)` under the stack layout:
 /// `[position: u4 | direction: u2 | stacked_state: u2]`.

@@ -10,7 +10,7 @@
 
   "types": {
     "requisite":      { "id": 0,  "visibility": "public",  "shape": "rect", "_comment": "Items / resources — logs, axe, food. Core trade goods." },
-    "_reserved_1":    { "id": 1,  "visibility": "public",  "shape": "rect", "_comment": "Reserved for a future tradeable category." },
+    "blueprint":      { "id": 1,  "visibility": "public",  "shape": "rect", "_comment": "Build plans — one card per entry in content/blueprints/data/. SoulPrivate.blueprints_0 stores the per-soul discovery bitfield; the wrench panel renders one card per known blueprint." },
     "revery":         { "id": 2,  "visibility": "public",  "shape": "rect", "_comment": "Memories — shared in-fiction via talk actions." },
     "_reserved_3":    { "id": 3,  "visibility": "public",  "shape": "rect", "_comment": "Reserved for a future tradeable category." },
     "discipline":     { "id": 4,  "visibility": "private", "shape": "rect", "_comment": "Player actions / verbs — soul-bound." },

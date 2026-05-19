@@ -227,14 +227,8 @@ pub const RESERVED_PATH_TOKENS: &[&str] = &[
   "duration",
   "style",
   // Anchors / refs
-  "hex",
   "root",
   "slot",
-  "actor",
-  "has",
-  // Stack-direction markers (tape form)
-  "up",
-  "down",
   // Namespace anchors (tape form)
   "sys",
   "var",

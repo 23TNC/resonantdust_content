@@ -2,6 +2,17 @@
 /* eslint-disable */
 
 /**
+ * Every registered blueprint in stable-id order. Returns an array of
+ * `Blueprint` objects; empty when no blueprints are declared. Throws
+ * on registry-build failure.
+ *
+ * Called by the wrench panel to enumerate the catalog for display —
+ * each entry's `cardPackedDefinition` resolves directly through
+ * `decodeDefinition` / `cardLabel` for the card-side visuals.
+ */
+export function allBlueprints(): any;
+
+/**
  * Every registered texture definition, in stable-id order. Each entry
  * carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
  * `size`, and `scale: { min, max }`. Returns an empty array when no
@@ -13,12 +24,40 @@
 export function allTextures(): any;
 
 /**
+ * Look up an aspect's numeric id by its declared name (the JSON
+ * key under `cards/aspects.json` — `"wood"`, `"corpus+"`, etc.).
+ * Returns `undefined` when the name isn't registered. Throws on
+ * registry-build failure.
+ *
+ * Used by the client recipe matcher to evaluate
+ * `<path>.aspect.<name>.min: <N>` predicates: the name appears in
+ * the recipe segments, but card defs store aspect entries keyed by
+ * numeric id — this helper bridges the two.
+ */
+export function aspectIdByName(name: string): number | undefined;
+
+/**
  * Look up an aspect by id. Returns the `Aspect` object (with `id`,
  * `name`, `description`, `icon`, `group` fields) or `null` for
  * `ASPECT_NONE` (id 0) and unknown ids. Throws on registry-build
  * failure.
  */
 export function aspectInfo(id: number): any;
+
+/**
+ * Look up a blueprint by its stable `u16` id. Returns the full
+ * Blueprint object (`id`, `key`, `cardKey`, `cardPackedDefinition`)
+ * or `null` if the id isn't registered. Throws on registry-build
+ * failure.
+ */
+export function blueprintById(id: number): any;
+
+/**
+ * Look up a blueprint by its source-key (e.g. `"nd_furnace"`).
+ * Returns the full Blueprint object or `null` if no blueprint with
+ * that key is registered. Throws on registry-build failure.
+ */
+export function blueprintByKey(key: string): any;
 
 /**
  * Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
@@ -145,6 +184,16 @@ export function recipeByKey(key: string): any;
 export function recipesAll(): any;
 
 /**
+ * Stable blueprint ids granted to a player on creating a character
+ * of the given soul. Sourced from the soul's `"blueprints"` array in
+ * `starter_packs/data/*.json`. Returns an empty array for souls that
+ * don't declare any. Throws on registry-build failure.
+ *
+ * Each id resolves to a full `Blueprint` via `blueprintById`.
+ */
+export function starterBlueprintsForSoul(soul: string): Uint16Array;
+
+/**
  * All starter packs registered for a given soul card key (e.g.
  * `"human"`). Returns an array of `StarterPack` objects (`id`,
  * `soul`, `packId`, `contents: [{cardKey, packedDefinition,
@@ -194,8 +243,12 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly allBlueprints: () => [number, number, number];
     readonly allTextures: () => [number, number, number];
+    readonly aspectIdByName: (a: number, b: number) => [number, number, number];
     readonly aspectInfo: (a: number) => [number, number, number];
+    readonly blueprintById: (a: number) => [number, number, number];
+    readonly blueprintByKey: (a: number, b: number) => [number, number, number];
     readonly cardFlagBit: (a: number, b: number) => [number, number, number];
     readonly cardFlagFieldValue: (a: number, b: number, c: number) => [number, number, number];
     readonly cardLabel: (a: number, b: number, c: number) => [number, number, number, number];
@@ -217,6 +270,7 @@ export interface InitOutput {
     readonly recipeById: (a: number) => [number, number, number];
     readonly recipeByKey: (a: number, b: number) => [number, number, number];
     readonly recipesAll: () => [number, number, number];
+    readonly starterBlueprintsForSoul: (a: number, b: number) => [number, number, number, number];
     readonly starterPacksForSoul: (a: number, b: number) => [number, number, number];
     readonly traitValue: (a: number, b: number, c: number) => [number, number, number];
     readonly unpackDefinition: (a: number) => [number, number, number];

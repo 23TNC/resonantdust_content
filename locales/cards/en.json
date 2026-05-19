@@ -23,6 +23,9 @@
       "description": {
         "simple": "A heavy pickaxe — useful for breaking stone."
       }
+    },
+    "stick": {
+      "label": "stick"
     }
   },
   "event": {
@@ -37,6 +40,9 @@
       "description": {
         "simple": "A burst of effort pinned to the world. Channel corpus into it to see it through."
       }
+    },
+    "test": {
+      "label": "test"
     }
   },
   "faculty": {
@@ -198,6 +204,23 @@
     },
     "plains_4": {
       "label": "plains_4"
+    },
+    "nd_furnace": {
+      "label": "nd_furnace"
+    },
+    "workbench": {
+      "label": "workbench"
+    },
+    "building_nd_furnace": {
+      "label": "building_nd_furnace"
+    },
+    "building_workbench": {
+      "label": "building_workbench"
+    }
+  },
+  "blueprint": {
+    "blueprint_nd_furnace": {
+      "label": "Furnace"
     }
   }
 }

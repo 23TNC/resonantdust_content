@@ -13,11 +13,17 @@
 //!   Format: `{ "<soul>": { "<pack_id>": <int>, ... }, ... }`.
 //! - `starter_packs/data/**/*.json` — each file is either a top-level
 //!   `{ "<soul>": { "<pack_id>": { "<card_key>": <count>, ... } } }`
-//!   object or an array of such objects.
+//!   object or an array of such objects. A reserved sibling key
+//!   `"blueprints": ["<blueprint_key>", ...]` may appear alongside the
+//!   pack ids — it lists the blueprints granted on character creation
+//!   for that soul and is not itself a redeemable pack (no stable
+//!   pack id, separate accessor [`starter_blueprints_for_soul`]).
 //!
 //! Card keys in pack contents are resolved to `packed_definition` at
 //! registry build time via [`crate::definition_core::find_packed_by_key`].
-//! The `soul` key is also validated against the card registry — a typo
+//! Blueprint keys under the `"blueprints"` array are resolved to stable
+//! [`BlueprintId`]s via [`crate::blueprint_core::find_blueprint`]. The
+//! `soul` key is also validated against the card registry — a typo
 //! becomes a stored registry-build error rather than a runtime spawn
 //! failure.
 //!
@@ -32,6 +38,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+use crate::blueprint_core::{BlueprintId, find_blueprint};
 use crate::definition_core::find_packed_by_key;
 use crate::embedded_data::STARTER_PACKS_FILES;
 
@@ -75,6 +82,11 @@ struct StarterPackRegistry {
   by_path: BTreeMap<(String, String), StarterPackId>,
   /// Soul → its packs' stable ids in ascending order.
   by_soul: BTreeMap<String, Vec<StarterPackId>>,
+  /// Soul → stable ids of the blueprints granted on character
+  /// creation, in declaration order. Sourced from each soul's
+  /// `"blueprints": [...]` array (a sibling of the pack ids under
+  /// the soul key). Empty when a soul doesn't declare any.
+  starter_blueprints: BTreeMap<String, Vec<BlueprintId>>,
 }
 
 static STARTER_PACKS: OnceLock<Result<StarterPackRegistry, String>> = OnceLock::new();
@@ -117,6 +129,15 @@ pub fn starter_packs_for_soul(soul: &str) -> Result<Vec<&'static StarterPack>, S
   Ok(ids.iter().filter_map(|id| registry.by_id.get(id)).collect())
 }
 
+/// Stable ids of the blueprints granted on creating a character of
+/// the given soul. Sourced from the soul's `"blueprints": [...]`
+/// array. Empty vec if the soul doesn't declare any. `Err` on
+/// registry-build failure.
+pub fn starter_blueprints_for_soul(soul: &str) -> Result<Vec<BlueprintId>, String> {
+  let registry = starter_packs_registry()?;
+  Ok(registry.starter_blueprints.get(soul).cloned().unwrap_or_default())
+}
+
 fn build_starter_packs() -> Result<StarterPackRegistry, String> {
   // 1. Load stable id map: { "<soul>": { "<pack_id>": <int> } }.
   let id_root: Value = serde_json::from_str(STARTER_PACK_IDS_JSON)
@@ -150,6 +171,7 @@ fn build_starter_packs() -> Result<StarterPackRegistry, String> {
   let mut by_id: BTreeMap<StarterPackId, StarterPack> = BTreeMap::new();
   let mut by_path: BTreeMap<(String, String), StarterPackId> = BTreeMap::new();
   let mut by_soul: BTreeMap<String, Vec<StarterPackId>> = BTreeMap::new();
+  let mut starter_blueprints: BTreeMap<String, Vec<BlueprintId>> = BTreeMap::new();
 
   for (filename, content) in STARTER_PACKS_FILES {
     let parsed: Value = serde_json::from_str(content)
@@ -192,6 +214,41 @@ fn build_starter_packs() -> Result<StarterPackRegistry, String> {
         })?;
 
         for (pack_id, contents_val) in packs_obj {
+          // `blueprints` is a per-soul array of starter blueprint keys
+          // (granted on character creation), not a redeemable pack —
+          // it sits alongside the real pack ids inside the soul's
+          // object. Parse it here and skip the rest of the pack-shape
+          // validation.
+          if pack_id == "blueprints" {
+            let arr = contents_val.as_array().ok_or_else(|| {
+              format!(
+                "{}: soul {:?}: `blueprints` must be a JSON array of blueprint keys",
+                filename, soul
+              )
+            })?;
+            let bucket = starter_blueprints.entry(soul.clone()).or_default();
+            for entry in arr {
+              let key = entry.as_str().ok_or_else(|| {
+                format!(
+                  "{}: soul {:?}: `blueprints` entries must be strings",
+                  filename, soul
+                )
+              })?;
+              let bp = find_blueprint(key)
+                .map_err(|e| {
+                  format!("{}: soul {:?}: blueprint {:?}: {}", filename, soul, key, e)
+                })?
+                .ok_or_else(|| {
+                  format!(
+                    "{}: soul {:?}: unknown blueprint key {:?} (not declared in any blueprints/data/*.json)",
+                    filename, soul, key
+                  )
+                })?;
+              bucket.push(bp.id);
+            }
+            continue;
+          }
+
           let stable_id = stable_ids
             .get(&(soul.clone(), pack_id.clone()))
             .copied()
@@ -265,5 +322,5 @@ fn build_starter_packs() -> Result<StarterPackRegistry, String> {
     ids.sort();
   }
 
-  Ok(StarterPackRegistry { by_id, by_path, by_soul })
+  Ok(StarterPackRegistry { by_id, by_path, by_soul, starter_blueprints })
 }

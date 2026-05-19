@@ -24,6 +24,12 @@
 //!                   `content/starter_packs/`. Each pack is a soul-scoped
 //!                   bundle of card-key → count pairs; card keys are
 //!                   resolved through `definition_core`.
+//! - [`blueprint_core`] blueprint registry, built lazily from
+//!                   `content/blueprints/`. Each blueprint is a named
+//!                   build-plan whose body currently carries just a
+//!                   target `card_id`; future revisions will expand the
+//!                   schema with requirements / outputs. Card keys are
+//!                   resolved through `definition_core`.
 //! - [`texture_core`]  texture registry, built lazily from
 //!                   `content/textures/`. Each texture is a render hint
 //!                   (`object`, `size`, `scale`) keyed by
@@ -40,6 +46,7 @@ pub mod recipe_core;
 pub mod recipe_statement;
 pub mod recipe_tape;
 pub mod starter_pack_core;
+pub mod blueprint_core;
 pub mod texture_core;
 pub mod flags_core;
 pub mod locales_core;

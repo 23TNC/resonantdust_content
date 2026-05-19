@@ -6,7 +6,7 @@
 //! registry with `u16`-keyed lookup.
 //!
 //! Re-exports the tape-form types ([`Recipe`], [`Seg`], [`Iterator`],
-//! [`Stmt`], [`Direction`], [`AnchorSet`]) so downstream consumers can
+//! [`Stmt`], [`AnchorSet`]) so downstream consumers can
 //! import everything from one place.
 //!
 //! # JSON shape (per data file)
@@ -32,7 +32,7 @@ use serde_json::Value;
 use crate::embedded_data::RECIPES_FILES;
 
 pub use crate::recipe_tape::{
-  AnchorSet, Direction, Iterator, Recipe, Seg, Stmt,
+  AnchorSet, Iterator, Recipe, Seg, Stmt,
 };
 
 const RECIPE_IDS_JSON: &str = include_str!("../recipes/id.json");
@@ -156,7 +156,7 @@ mod tests {
       .expect("find_recipe")
       .expect("cut_tree present");
     assert_eq!(r.id, "cut_tree");
-    assert!(r.anchors.hex, "cut_tree must require hex");
+    assert!(r.anchors.has_branch(0), "cut_tree must require branch 0 (tile)");
   }
 
   #[test]

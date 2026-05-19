@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-gen-ids.py — Generate stable ID mappings for recipes, cards, starter packs, and textures.
+gen-ids.py — Generate stable ID mappings for recipes, cards, starter packs, blueprints, and textures.
 
 Produces:
   recipes/id.json        { "<recipe-id>": <stable-int>, ... }
   cards/id.json          { "<card_type>": { "<key>": <definition_id>, ... } }
   starter_packs/id.json  { "<soul>": { "<pack_id>": <stable-int>, ... } }
+  blueprints/id.json     { "<blueprint_key>": <stable-int>, ... }
   textures/id.json       { "<card_type>": { "<key>": <texture_id>, ... } }
 
-Reads recipe / card / starter-pack / texture definition files from
-`<root>/data/**/*.json` under each subsystem. Sibling metadata
+Reads recipe / card / starter-pack / blueprint / texture definition files
+from `<root>/data/**/*.json` under each subsystem. Sibling metadata
 (types.json, aspects.json, flags.json, traits.json, the id.json files
 themselves) is ignored.
 
@@ -184,10 +185,18 @@ def gen_card_ids(data_dir: Path, skip_known: bool) -> bool:
             errors.append(f"{rel}: top-level must be an object keyed by card_type")
             continue
         for type_name, cards_obj in root.items():
+            # Skip JSON-doc convention keys (`_comment`, etc.) at the
+            # type level — same rule as the recipes-file parser above.
+            if type_name.startswith("_"):
+                continue
             if not isinstance(cards_obj, dict):
                 errors.append(f"{rel}: type {type_name!r}: value not an object")
                 continue
             for key in cards_obj:
+                # Skip JSON-doc convention keys at the card level
+                # (sibling to real card keys within a type).
+                if key.startswith("_"):
+                    continue
                 if key in all_keys:
                     prev = all_keys[key]
                     errors.append(
@@ -302,7 +311,20 @@ def gen_starter_pack_ids(data_dir: Path, skip_known: bool) -> bool:
                 if not isinstance(packs_obj, dict):
                     errors.append(f"{rel}: soul {soul_key!r}: pack map is not an object")
                     continue
-                for pack_id in packs_obj:
+                for pack_id, body in packs_obj.items():
+                    # `blueprints` is a per-soul list of starter blueprint
+                    # keys (the set of blueprints granted on character
+                    # creation), not a redeemable pack — skip the id
+                    # assignment but still validate the shape so a
+                    # malformed entry surfaces here rather than at
+                    # registry-build time. The Rust loader resolves the
+                    # individual blueprint keys.
+                    if pack_id == "blueprints":
+                        if not isinstance(body, list):
+                            errors.append(
+                                f"{rel}: soul {soul_key!r}: `blueprints` must be a JSON array of blueprint keys"
+                            )
+                        continue
                     pair = (soul_key, pack_id)
                     if pair in all_pairs:
                         errors.append(
@@ -361,6 +383,95 @@ def gen_starter_pack_ids(data_dir: Path, skip_known: bool) -> bool:
     return True
 
 
+# ── Blueprints ─────────────────────────────────────────────────────────────────
+
+
+def gen_blueprint_ids(data_dir: Path, skip_known: bool) -> bool:
+    """Blueprints share one flat id namespace, same shape as recipes —
+    `{ "<blueprint_key>": <stable-int>, ... }`. The body schema is
+    intentionally lax: this pass only collects the top-level keys for
+    id assignment. The Rust loader validates body fields (`blueprint`
+    card key + `card` output key) at registry-build time."""
+    blueprints_dir = data_dir / "blueprints"
+    defs_dir = blueprints_dir / "data"
+    id_path = blueprints_dir / "id.json"
+
+    if not defs_dir.exists():
+        # No blueprint data tree — nothing to generate. Skip silently.
+        print("  (no blueprints/data directory, skipping)")
+        return True
+
+    if skip_known:
+        existing: dict = load_json(id_path) if id_path.exists() else {}
+    else:
+        existing = {}
+
+    all_keys: list[str] = []
+    seen: dict[str, str] = {}  # key -> first file that declared it
+    errors: list[str] = []
+
+    for bp_file in sorted(defs_dir.rglob("*.json")):
+        rel = bp_file.relative_to(defs_dir).as_posix()
+        try:
+            root = load_json(bp_file)
+        except json.JSONDecodeError as e:
+            errors.append(f"{rel}: JSON parse error: {e}")
+            continue
+        if not isinstance(root, dict):
+            errors.append(f"{rel}: top-level must be an object keyed by blueprint key")
+            continue
+        for key, body in root.items():
+            # Skip JSON-doc convention keys (`_comment`, etc.).
+            if key.startswith("_"):
+                continue
+            if not isinstance(body, dict):
+                errors.append(f"{rel}: blueprint {key!r}: body must be an object")
+                continue
+            if key in seen:
+                errors.append(
+                    f"Duplicate blueprint key '{key}' in {rel}"
+                    f" (first seen in {seen[key]})"
+                )
+            else:
+                seen[key] = rel
+                all_keys.append(key)
+
+    if errors:
+        for e in errors:
+            print(f"  ERROR: {e}", file=sys.stderr)
+        return False
+
+    result: dict = dict(existing) if skip_known else {}
+    nid = next_id(result) if result else 1
+    n_added = 0
+
+    for key in all_keys:
+        if key not in result:
+            result[key] = nid
+            if skip_known:
+                print(f"    + {key} = {nid}")
+            n_added += 1
+            nid += 1
+
+    n_removed = 0
+    if skip_known:
+        active = set(all_keys)
+        removed = [k for k in existing if k not in active]
+        for r in removed:
+            print(f"  WARNING: '{r}' (id={existing[r]}) no longer in source — ID reserved")
+        n_removed = len(removed)
+
+    result_sorted = dict(sorted(result.items(), key=lambda kv: kv[1]))
+
+    with open(id_path, "w", encoding="utf-8") as f:
+        json.dump(result_sorted, f, indent=2)
+        f.write("\n")
+
+    n_active = len(all_keys)
+    print(f"  {n_active} active, {n_added} new, {n_removed} removed")
+    return True
+
+
 # ── Textures ───────────────────────────────────────────────────────────────────
 
 MAX_TEXTURE_ID = 65535  # u16; 0 is sentinel
@@ -401,10 +512,15 @@ def gen_texture_ids(data_dir: Path, skip_known: bool) -> bool:
             errors.append(f"{rel}: top-level must be an object keyed by card_type")
             continue
         for type_name, textures_obj in root.items():
+            # Skip JSON-doc convention keys (`_comment`, etc.).
+            if type_name.startswith("_"):
+                continue
             if not isinstance(textures_obj, dict):
                 errors.append(f"{rel}: type {type_name!r}: value not an object")
                 continue
             for key in textures_obj:
+                if key.startswith("_"):
+                    continue
                 type_keys = by_type.setdefault(type_name, [])
                 if key in type_keys:
                     errors.append(
@@ -753,6 +869,10 @@ def main():
 
     print("Starter packs:")
     if not gen_starter_pack_ids(data_dir, args.skip_known):
+        ok = False
+
+    print("Blueprints:")
+    if not gen_blueprint_ids(data_dir, args.skip_known):
         ok = False
 
     print("Textures:")

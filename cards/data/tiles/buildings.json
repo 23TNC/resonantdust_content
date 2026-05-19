@@ -1,0 +1,24 @@
+{
+  "tile":{
+    "building_nd_furnace": {
+      "style": [ "#799E50", "#0b1426", "#0b1426" ],
+      "sprite": "256_nd_furnace",
+      "traits": {
+        "cost": 50
+      },
+      "stock": [
+        { "aspect": "fire", "max": 3, "default": 0 }
+      ]
+    },
+    "building_workbench": {
+      "style": [ "#799E50", "#0b1426", "#0b1426" ],
+      "sprite": "256_workbench",
+      "traits": {
+        "cost": 50
+      },
+      "stock": [
+        { "aspect": "fire", "max": 3, "default": 0 }
+      ]
+    }
+  }
+}

@@ -979,6 +979,14 @@ fn build_cards() -> Result<CardRegistry, String> {
       })?;
 
       for (key, value) in cards_obj.iter() {
+        // Skip JSON-doc convention keys (`_comment`, etc.) — same
+        // rule used at the top-level type loop above and by the
+        // recipes parser. Authors can sprinkle these into card-data
+        // files (e.g. `"_comment": "🪓⛏🔨🪏"` as a header for a
+        // requisite group) without tripping the registry build.
+        if key.starts_with('_') {
+          continue;
+        }
         let definition_id = definition_ids
           .get(type_name)
           .and_then(|m| m.get(key.as_str()))
