@@ -2,65 +2,112 @@
   "tile": {
     "mountain_1": {
       "style": [ "#6B6859", "#0b1426", "#0b1426" ],
-      "traits": {
-        "cost": 15,
-        "elevation_min": 0.70, "elevation_max": 1.00,
-        "rarity": 1.0
-      },
       "stock": [
-        { "aspect": "stone", "max": 2, "default": 0, "climate_axis": "elevation",
-          "climate_axis_min": 0.70, "climate_axis_max": 1.00 },
+        {
+          "aspect": "stone",
+          "max": 2,
+          "default": 0,
+          "climate_axis": "elevation",
+          "climate_axis_min": 0.7,
+          "climate_axis_max": 1.0
+        },
         { "aspect": "flora", "max": 1, "default": 0, "climate_axis": "humidity" }
-      ]
+      ],
+      "aspects": { "cost": 15, "elevation_min": 0.7, "elevation_max": 1.0, "rarity": 1.0 }
     },
     "mountain_2": {
       "style": [ "#5A574A", "#8B8675", "#0b1426" ],
-      "traits": {
-        "cost": 20,
-        "elevation_min": 0.75, "elevation_max": 1.00,
-        "temperature_min": 0.10, "temperature_max": 0.90,
-        "humidity_min": 0.10, "humidity_max": 0.80,
-        "rarity": 0.7
-      },
       "stock": [
-        { "aspect": "stone", "max": 2, "default": 0, "climate_axis": "elevation",
-          "climate_axis_min": 0.75, "climate_axis_max": 1.00 },
-        { "aspect": "metal", "max": 1, "default": 0, "climate_axis": "elevation",
-          "climate_axis_min": 0.75, "climate_axis_max": 1.00 }
-      ]
+        {
+          "aspect": "stone",
+          "max": 2,
+          "default": 0,
+          "climate_axis": "elevation",
+          "climate_axis_min": 0.75,
+          "climate_axis_max": 1.0
+        },
+        {
+          "aspect": "metal",
+          "max": 1,
+          "default": 0,
+          "climate_axis": "elevation",
+          "climate_axis_min": 0.75,
+          "climate_axis_max": 1.0
+        }
+      ],
+      "aspects": {
+        "cost": 20,
+        "elevation_min": 0.75,
+        "elevation_max": 1.0,
+        "temperature_min": 0.1,
+        "temperature_max": 0.9,
+        "humidity_min": 0.1,
+        "humidity_max": 0.8,
+        "rarity": 0.7
+      }
     },
     "mountain_3": {
       "style": [ "#5A574A", "#9B7B3F", "#0b1426" ],
-      "traits": {
-        "cost": 35,
-        "elevation_min": 0.80, "elevation_max": 1.00,
-        "temperature_min": 0.10, "temperature_max": 0.80,
-        "humidity_min": 0.10, "humidity_max": 0.70,
-        "rarity": 0.2
-      },
       "stock": [
-        { "aspect": "stone", "max": 3, "default": 3, "climate_axis": "elevation",
-          "climate_axis_min": 0.80, "climate_axis_max": 1.00 },
-        { "aspect": "metal", "max": 2, "default": 2, "climate_axis": "elevation",
-          "climate_axis_min": 0.80, "climate_axis_max": 1.00 }
-      ]
+        {
+          "aspect": "stone",
+          "max": 3,
+          "default": 3,
+          "climate_axis": "elevation",
+          "climate_axis_min": 0.8,
+          "climate_axis_max": 1.0
+        },
+        {
+          "aspect": "metal",
+          "max": 2,
+          "default": 2,
+          "climate_axis": "elevation",
+          "climate_axis_min": 0.8,
+          "climate_axis_max": 1.0
+        }
+      ],
+      "aspects": {
+        "cost": 35,
+        "elevation_min": 0.8,
+        "elevation_max": 1.0,
+        "temperature_min": 0.1,
+        "temperature_max": 0.8,
+        "humidity_min": 0.1,
+        "humidity_max": 0.7,
+        "rarity": 0.2
+      }
     },
     "mountain_4": {
       "style": [ "#5A574A", "#E8E8F0", "#0b1426" ],
-      "traits": {
+      "stock": [
+        {
+          "aspect": "stone",
+          "max": 3,
+          "default": 3,
+          "climate_axis": "elevation",
+          "climate_axis_min": 0.9,
+          "climate_axis_max": 1.0
+        },
+        {
+          "aspect": "flora",
+          "max": 1,
+          "default": 1,
+          "climate_axis": "humidity",
+          "climate_axis_min": 0.2,
+          "climate_axis_max": 0.8
+        }
+      ],
+      "aspects": {
         "cost": 40,
         "height": 1,
-        "elevation_min": 0.90, "elevation_max": 1.00,
-        "temperature_min": 0.00, "temperature_max": 0.50,
-        "humidity_min": 0.20, "humidity_max": 0.80,
+        "elevation_min": 0.9,
+        "elevation_max": 1.0,
+        "temperature_min": 0.0,
+        "temperature_max": 0.5,
+        "humidity_min": 0.2,
+        "humidity_max": 0.8,
         "rarity": 0.2
-      },
-      "stock": [
-        { "aspect": "stone", "max": 3, "default": 3, "climate_axis": "elevation",
-          "climate_axis_min": 0.90, "climate_axis_max": 1.00 },
-        { "aspect": "flora", "max": 1, "default": 1, "climate_axis": "humidity",
-          "climate_axis_min": 0.20, "climate_axis_max": 0.80 }
-      ]
+      }
     }
   }
 }

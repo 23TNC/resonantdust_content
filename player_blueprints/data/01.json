@@ -1,0 +1,7 @@
+{
+  "_comment": "Player-scope blueprints. Mirror of content/blueprints/data/ but with card_type=player_blueprint (id=3) instead of card_type=blueprint (id=1). Discovery bits live on PlayerProfile.blueprints_0; placement count vs cap is tracked in PlayerProfile.blueprint_info.",
+  "soul_slot": {
+    "card":      "building_nd_furnace",
+    "blueprint": "player_blueprint_soul_slot"
+  }
+}

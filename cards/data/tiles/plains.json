@@ -2,62 +2,93 @@
   "tile": {
     "plains_1": {
       "style": [ "#C9D75F", "#0b1426", "#0b1426" ],
-      "traits": {
-        "cost": 5,
-        "humidity_min": 0.20, "humidity_max": 0.55,
-        "temperature_min": 0.30, "temperature_max": 0.80,
-        "elevation_min": 0.30, "elevation_max": 0.70,
-        "rarity": 1.0
-      },
       "stock": [
-        { "aspect": "flora",   "max": 1, "default": 0, "climate_axis": "humidity" },
+        { "aspect": "flora", "max": 1, "default": 0, "climate_axis": "humidity" },
         { "aspect": "berry", "max": 1, "default": 0, "climate_axis": "humidity" }
-      ]
+      ],
+      "aspects": {
+        "cost": 5,
+        "humidity_min": 0.2,
+        "humidity_max": 0.55,
+        "temperature_min": 0.3,
+        "temperature_max": 0.8,
+        "elevation_min": 0.3,
+        "elevation_max": 0.7,
+        "rarity": 1.0
+      }
     },
     "plains_2": {
       "style": [ "#7DA838", "#C9D75F", "#0b1426" ],
-      "traits": {
-        "cost": 7,
-        "humidity_min": 0.30, "humidity_max": 0.55,
-        "temperature_min": 0.30, "temperature_max": 0.75,
-        "elevation_min": 0.30, "elevation_max": 0.70,
-        "rarity": 0.7
-      },
       "stock": [
-        { "aspect": "flora",   "max": 2, "default": 0, "climate_axis": "humidity" },
+        { "aspect": "flora", "max": 2, "default": 0, "climate_axis": "humidity" },
         { "aspect": "berry", "max": 1, "default": 0, "climate_axis": "humidity" }
-      ]
+      ],
+      "aspects": {
+        "cost": 7,
+        "humidity_min": 0.3,
+        "humidity_max": 0.55,
+        "temperature_min": 0.3,
+        "temperature_max": 0.75,
+        "elevation_min": 0.3,
+        "elevation_max": 0.7,
+        "rarity": 0.7
+      }
     },
     "plains_3": {
       "style": [ "#7DA838", "#B8434A", "#0b1426" ],
-      "traits": {
-        "cost": 12,
-        "humidity_min": 0.30, "humidity_max": 0.50,
-        "temperature_min": 0.40, "temperature_max": 0.70,
-        "elevation_min": 0.35, "elevation_max": 0.65,
-        "rarity": 0.2
-      },
       "stock": [
-        { "aspect": "berry", "max": 3, "default": 3, "climate_axis": "humidity",
-          "climate_axis_min": 0.30, "climate_axis_max": 0.50 },
-        { "aspect": "flora",   "max": 1, "default": 1, "climate_axis": "humidity" }
-      ]
+        {
+          "aspect": "berry",
+          "max": 3,
+          "default": 3,
+          "climate_axis": "humidity",
+          "climate_axis_min": 0.3,
+          "climate_axis_max": 0.5
+        },
+        { "aspect": "flora", "max": 1, "default": 1, "climate_axis": "humidity" }
+      ],
+      "aspects": {
+        "cost": 12,
+        "humidity_min": 0.3,
+        "humidity_max": 0.5,
+        "temperature_min": 0.4,
+        "temperature_max": 0.7,
+        "elevation_min": 0.35,
+        "elevation_max": 0.65,
+        "rarity": 0.2
+      }
     },
     "plains_4": {
       "style": [ "#7DA838", "#8856A8", "#0b1426" ],
-      "traits": {
-        "cost": 12,
-        "humidity_min": 0.40, "humidity_max": 0.55,
-        "temperature_min": 0.45, "temperature_max": 0.75,
-        "elevation_min": 0.30, "elevation_max": 0.65,
-        "rarity": 0.2
-      },
       "stock": [
-        { "aspect": "flora",   "max": 3, "default": 3, "climate_axis": "humidity",
-          "climate_axis_min": 0.40, "climate_axis_max": 0.55 },
-        { "aspect": "berry", "max": 2, "default": 2, "climate_axis": "humidity",
-          "climate_axis_min": 0.40, "climate_axis_max": 0.55 }
-      ]
+        {
+          "aspect": "flora",
+          "max": 3,
+          "default": 3,
+          "climate_axis": "humidity",
+          "climate_axis_min": 0.4,
+          "climate_axis_max": 0.55,
+          "mode": "index"
+        },
+        {
+          "aspect": "berry",
+          "max": 2,
+          "default": 2,
+          "climate_axis": "humidity",
+          "climate_axis_min": 0.4,
+          "climate_axis_max": 0.55
+        }
+      ],
+      "aspects": {
+        "cost": 12,
+        "humidity_min": 0.4,
+        "humidity_max": 0.55,
+        "temperature_min": 0.45,
+        "temperature_max": 0.75,
+        "elevation_min": 0.3,
+        "elevation_max": 0.65,
+        "rarity": 0.2
+      }
     }
   }
 }

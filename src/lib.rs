@@ -45,6 +45,7 @@ pub mod biome_core;
 pub mod recipe_core;
 pub mod recipe_statement;
 pub mod recipe_tape;
+pub mod recipe_aliases;
 pub mod starter_pack_core;
 pub mod blueprint_core;
 pub mod texture_core;

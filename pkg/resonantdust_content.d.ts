@@ -2,24 +2,31 @@
 /* eslint-disable */
 
 /**
- * Every registered blueprint in stable-id order. Returns an array of
- * `Blueprint` objects; empty when no blueprints are declared. Throws
- * on registry-build failure.
- *
- * Called by the wrench panel to enumerate the catalog for display —
- * each entry's `cardPackedDefinition` resolves directly through
- * `decodeDefinition` / `cardLabel` for the card-side visuals.
+ * Every registered soul-scope blueprint in stable-id order.
+ * Called by the wrench panel to enumerate the catalog for display.
  */
 export function allBlueprints(): any;
 
 /**
+ * Player-scope analog of [`all_blueprints`]. Called by the dna
+ * (🧬) panel to enumerate the player-blueprint catalog.
+ */
+export function allPlayerBlueprints(): any;
+
+/**
  * Every registered texture definition, in stable-id order. Each entry
- * carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
- * `size`, and `scale: { min, max }`. Returns an empty array when no
- * textures are registered. Throws on registry-build failure.
+ * carries `id`, `aspectId`, `aspectName`, `size`,
+ * `scale: { min, max }`, and `anchor: { x, y }`. Returns an empty
+ * array when no aspect carries render metadata. Throws on
+ * registry-build failure.
  *
- * Called once at startup by `TextureRegistry.ts` to build the client-side
- * lookup map; not intended for per-frame use.
+ * Post card-object unification (see
+ * docs/CARD_OBJECT_UNIFICATION.md) entries are aspect-keyed and the
+ * pack-folder on disk is named `<size>_<aspectName>_pack/` — pack
+ * name and aspect name are the same string.
+ *
+ * Called once at startup by `TextureRegistry.ts` to build the
+ * client-side lookup map; not intended for per-frame use.
  */
 export function allTextures(): any;
 
@@ -45,42 +52,91 @@ export function aspectIdByName(name: string): number | undefined;
 export function aspectInfo(id: number): any;
 
 /**
- * Look up a blueprint by its stable `u16` id. Returns the full
- * Blueprint object (`id`, `key`, `cardKey`, `cardPackedDefinition`)
- * or `null` if the id isn't registered. Throws on registry-build
- * failure.
+ * Read the numeric value of a named aspect off a packed card
+ * definition. Returns `null` when:
+ * - the aspect name isn't in `aspects.json`,
+ * - the def doesn't carry that aspect,
+ * - or the packed def doesn't resolve to a registered card.
+ *
+ * Source-of-truth pair with the server's
+ * `def.aspect_value(aspect_id("name"))` path — both go through the
+ * same `CardDefinition::aspect_value` lookup, so client and server
+ * agree on cost / speed / inventory / etc. numbers by construction.
+ *
+ * Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
+ * resolve per-tile `cost` and per-soul `speed` for the step-time
+ * calculation, mirroring the server validator in
+ * `movement::move_soul_path`.
+ */
+export function aspectValue(packed_def: number, name: string): number | undefined;
+
+/**
+ * Look up a soul-scope blueprint by its stable `u16` id. Returns
+ * the full Blueprint object or `null` if the id isn't registered.
+ * Throws on registry-build failure.
  */
 export function blueprintById(id: number): any;
 
 /**
- * Look up a blueprint by its source-key (e.g. `"nd_furnace"`).
- * Returns the full Blueprint object or `null` if no blueprint with
- * that key is registered. Throws on registry-build failure.
+ * Look up a soul-scope blueprint by its source-key. Returns the
+ * full Blueprint object or `null`. Throws on registry-build failure.
  */
 export function blueprintByKey(key: string): any;
 
 /**
- * Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
- * `"position_locked"`, `"dead"`). Returns `undefined` if no flag with
- * that name is declared in `cards/flags.json`. Throws on registry-build
- * failure. JS-side callers typically convert to a mask via
- * `1 << bit` before testing against `row.flags`.
+ * **Legacy** — bit position (0..=31) of a card-flag by name, searched
+ * across both `cards_state` and `cards_bk` fields (state first).
+ * Returns `undefined` if no single-bit flag with that name exists in
+ * either field. Ambiguous against the split-field schema — callers
+ * that need to know which host integer the bit lives in should use
+ * [`cardFlagBitIn`] with an explicit field name instead.
  */
 export function cardFlagBit(name: string): number | undefined;
 
 /**
- * Read the value of a multi-bit card-flag field (e.g.
- * `"progress_style"`, `"position_hold_count"`) out of a `flags`
- * u32. Returns `undefined` if no field with that name is declared in
- * `cards/flags.json`; returns the extracted unsigned value
- * otherwise. Throws on registry-build failure.
- *
- * Equivalent to `(flags >> field.shift) & field.mask`. JS-side
- * callers checking "is the count > 0?" use `value > 0`; callers
- * reading specific enum-style values (`progress_style == 1`)
- * compare directly.
+ * Bit position (0..=31) of a single-bit flag in a specific field.
+ * `field` is `"cards_state"` or `"cards_bk"`. Returns `undefined` if
+ * no single-bit flag with that name is declared in the given field.
+ * Preferred over [`cardFlagBit`] for new call sites — explicit field
+ * argument means lookups can't accidentally collide across fields.
+ */
+export function cardFlagBitIn(field: string, name: string): number | undefined;
+
+/**
+ * `(shift, width)` of a multi-bit flag field in a specific field.
+ * Returns `undefined` if no multi-bit field with that name is
+ * declared in the given field. Use the returned pair to mask:
+ * `mask = ((1 << width) - 1) << shift`, value extract:
+ * `(host >> shift) & ((1 << width) - 1)`.
+ */
+export function cardFlagFieldShape(field: string, name: string): Uint8Array | undefined;
+
+/**
+ * **Legacy** — read the value of a multi-bit card-flag field by
+ * name, searching across both `cards_state` and `cards_bk` (state
+ * first). Caller passes a single `flags` u32 that should be the
+ * matching host integer; ambiguous against the split-field schema.
+ * Prefer [`cardFlagFieldValueIn`] with an explicit field name for
+ * new call sites.
  */
 export function cardFlagFieldValue(flags: number, name: string): number | undefined;
+
+/**
+ * Field-routing helper for multi-bit fields — given both host
+ * integers and a field name, returns the extracted value from
+ * whichever field declares it (state-first lookup). Returns
+ * `undefined` for unknown field names.
+ */
+export function cardFlagFieldValueAny(state: number, bk: number, name: string): number | undefined;
+
+/**
+ * Read the value of a multi-bit field in a specific host integer.
+ * `field` is `"cards_state"` or `"cards_bk"`; `host` is the value
+ * of the corresponding `Card.flags_state` / `Card.flags_bk` column.
+ * Returns `undefined` if no multi-bit field with that name is
+ * declared in the given field.
+ */
+export function cardFlagFieldValueIn(field: string, host: number, name: string): number | undefined;
 
 /**
  * Look up the display label for a packed definition in the given
@@ -114,6 +170,19 @@ export function decodeDefinition(packed: number): any;
  */
 export function findPackedByKey(key: string): number | undefined;
 
+/**
+ * Field-routing helper — given **both** flag host integers and a
+ * flag name, returns `true` if the named single-bit flag is set in
+ * whichever field declares it. Looks up `cards_state` first then
+ * `cards_bk`; consults only the matching host. Callers pass the
+ * whole `(state, bk)` pair from the card row so the lookup is
+ * unambiguous against the split schema.
+ *
+ * Returns `false` for unknown flag names (the safe default for
+ * "absent") and for cards whose bit is clear in the matching host.
+ */
+export function hasCardFlag(state: number, bk: number, name: string): boolean;
+
 export function inventoryLayer(): number;
 
 /**
@@ -139,6 +208,16 @@ export function packStackMicroZone(position: number, direction: number, stacked_
 export function packValidAt(time_ms: bigint, sequence: number): bigint;
 
 export function packZoneDefinition(card_type: number): number;
+
+/**
+ * Player-scope analog of [`blueprint_by_id`].
+ */
+export function playerBlueprintById(id: number): any;
+
+/**
+ * Player-scope analog of [`blueprint_by_key`].
+ */
+export function playerBlueprintByKey(key: string): any;
 
 export function pocketDimensionLayer(): number;
 
@@ -206,25 +285,6 @@ export function starterBlueprintsForSoul(soul: string): Uint16Array;
  */
 export function starterPacksForSoul(soul: string): any;
 
-/**
- * Read the numeric value of a named trait off a packed card
- * definition. Returns `null` when:
- * - the trait name isn't in `traits.json`,
- * - the def doesn't carry that trait,
- * - or the packed def doesn't resolve to a registered card.
- *
- * Source-of-truth pair with the server's
- * `def.trait_value(trait_id("name"))` path — both go through the
- * same `CardDefinition::trait_value` lookup, so client and server
- * agree on cost / speed numbers by construction.
- *
- * Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
- * resolve per-tile `cost` and per-soul `speed` for the step-time
- * calculation, mirroring the server validator in
- * `movement::move_soul_path`.
- */
-export function traitValue(packed_def: number, name: string): number | undefined;
-
 export function unpackDefinition(v: number): any;
 
 export function unpackMacroZone(v: number): any;
@@ -244,17 +304,24 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly allBlueprints: () => [number, number, number];
+    readonly allPlayerBlueprints: () => [number, number, number];
     readonly allTextures: () => [number, number, number];
     readonly aspectIdByName: (a: number, b: number) => [number, number, number];
     readonly aspectInfo: (a: number) => [number, number, number];
+    readonly aspectValue: (a: number, b: number, c: number) => [number, number, number];
     readonly blueprintById: (a: number) => [number, number, number];
     readonly blueprintByKey: (a: number, b: number) => [number, number, number];
     readonly cardFlagBit: (a: number, b: number) => [number, number, number];
+    readonly cardFlagBitIn: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly cardFlagFieldShape: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly cardFlagFieldValue: (a: number, b: number, c: number) => [number, number, number];
+    readonly cardFlagFieldValueAny: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly cardFlagFieldValueIn: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly cardLabel: (a: number, b: number, c: number) => [number, number, number, number];
     readonly cardTypeId: (a: number, b: number) => [number, number, number];
     readonly decodeDefinition: (a: number) => [number, number, number];
     readonly findPackedByKey: (a: number, b: number) => [number, number, number];
+    readonly hasCardFlag: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly inventoryLayer: () => number;
     readonly isHexType: (a: number) => [number, number, number];
     readonly isStackLayout: (a: number, b: number) => number;
@@ -266,13 +333,14 @@ export interface InitOutput {
     readonly packStackMicroZone: (a: number, b: number, c: number) => number;
     readonly packValidAt: (a: bigint, b: number) => bigint;
     readonly packZoneDefinition: (a: number) => number;
+    readonly playerBlueprintById: (a: number) => [number, number, number];
+    readonly playerBlueprintByKey: (a: number, b: number) => [number, number, number];
     readonly pocketDimensionLayer: () => number;
     readonly recipeById: (a: number) => [number, number, number];
     readonly recipeByKey: (a: number, b: number) => [number, number, number];
     readonly recipesAll: () => [number, number, number];
     readonly starterBlueprintsForSoul: (a: number, b: number) => [number, number, number, number];
     readonly starterPacksForSoul: (a: number, b: number) => [number, number, number];
-    readonly traitValue: (a: number, b: number, c: number) => [number, number, number];
     readonly unpackDefinition: (a: number) => [number, number, number];
     readonly unpackMacroZone: (a: number) => [number, number, number];
     readonly unpackMicroZone: (a: number) => [number, number, number];

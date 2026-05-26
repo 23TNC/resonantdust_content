@@ -279,8 +279,13 @@ fn walk(
     return Ok(());
   }
   // Non-leaf: every value must be a child object, and its key extends
-  // the path stack.
+  // the path stack. `_`-prefixed keys are documentation (e.g.
+  // `_comment` at the file's top level) — skipped, same convention as
+  // `aspects.json` / `cards.json` / `recipes.json`.
   for (k, v) in obj {
+    if k.starts_with('_') {
+      continue;
+    }
     let child = v.as_object().ok_or_else(|| {
       format!(
         "{}: at path {:?}: child {:?} must be either an object with a 'label' field (leaf) or an object of further sub-paths",

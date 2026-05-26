@@ -1,0 +1,10 @@
+{
+  "tile": {
+    "empty": { "style": [ "#0b1426", "#0b1426", "#0b1426" ], "aspects": { "cost": 10 } },
+    "concrete": {
+      "style": [ "#9b9a96", "#0b1426", "#0b1426" ],
+      "texture": { "name": "concrete" },
+      "aspects": { "cost": 10 }
+    }
+  }
+}

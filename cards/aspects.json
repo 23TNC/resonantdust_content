@@ -1,51 +1,88 @@
 {
-  "_comment": "Aspect catalog — tags placed on cards (static `aspects`) or row-mutable tile stock (`stock`) to describe function. Flat top-level: each entry is a top-level aspect. Sub-aspects are NESTED inside their parent's object; parent relationship is implicit in the JSON tree. Sub-aspects inherit their parent's `icon` AND `color` if they omit them. The recipe matcher (when widened) treats sub-aspects as satisfying their ancestors — a tile carrying `berries` satisfies `{aspect: food, min: 1}`. Storage and `output.modify` consumption stay concrete (slot is declared by leaf name; consume by the same).",
+  "_comment": "Aspect catalog. One registry, three sections — same code shape for all entries (the `category` recorded on each Aspect record reflects the section it was parsed under). Sub-aspect nesting is preserved within a section: a card carrying `pine` satisfies `aspect.wood.min: 1` because pine is nested under wood. Sub-aspects inherit `icon`, `color`, `description` and `category` from the nearest declaring ancestor — omit a field (or leave description as \"\") to inherit. `icon` and `color` are OPTIONAL throughout (default `\"\"` and `0x888888`) — entries with no display intent (most traits) just leave them off. The three sections:\n\n  • `aspects` — WHAT a card has. Resources, materials, soul stats. Primary recipe inputs. Displayed in details (always, including the minimum/collapsed state).\n  • `features` — HOW a card acts. Behavioural / functional tags (faction, fleeting, level, crafting, speed, inventory). Recipe-matchable too, just less commonly. Displayed in details only when expanded; rendered above the description in a smaller pip row.\n  • `traits` — WHAT a card is. Descriptive properties read by simulation code (movement cost, height, climate envelopes, placement metadata). Not displayed. Recipe-matchable via the same `aspect.<name>.min: N` predicate (values are f32 so float predicates work).\n\nValues on cards are f32 (the same value can be `2`, `2.0`, or `1.2` — author's choice; integers parse without loss).",
 
-  "wood": {
-    "icon": "🪵", "color": "#6B4423", "description": "Timber — logs, branches, raw lumber",
-    "pine": { "description": "Pine — fast-growing softwood" }
+  "aspects": {
+    "wood": {
+      "icon": "🪵", "color": "#6B4423", "description": "Timber — logs, branches, raw lumber",
+      "pine": { "description": "Pine — fast-growing softwood" }
+    },
+
+    "stone": { "icon": "🪨", "color": "#808080", "description": "Rock, ore, mineral material" },
+
+    "metal": { "icon": "⬛", "color": "#A0A0A0", "description": "Processed or smelted metallic material" },
+
+    "food": {
+      "icon": "🌾", "color": "#CCAA22", "description": "Sustenance, edible produce",
+      "berry": {}
+    },
+
+    "flora": {
+      "icon": "🌿", "color": "#4A8B3E", "description": "Living plant matter — trees, bushes, undergrowth",
+      "brush": { "description": "Brush — tangled undergrowth" }
+    },
+
+    "fire": {
+      "icon": "🔥", "color": "#CC3311", "description": "Combustible energy source",
+      "fuel": {}
+    },
+
+    "water": { "icon": "💧", "color": "#1E6B9E", "description": "Fresh water — drinking, irrigation, flow" },
+
+    "corpse":   { "icon": "💀", "color": "#3a3a3a", "description": "Remains — a spent body, suitable as a recipe input for rituals and similar story beats" },
+
+    "corpus--": { "icon": "🜔", "color": "#E67E7E", "description": "Injuries — wounds, broken bones, lasting harm" },
+    "corpus++": { "icon": "🜔", "color": "#E67E7E", "description": "Enhanced corpus — vigor, heightened resilience" },
+    "corpus": {
+      "icon": "🜔", "color": "#E67E7E", "description": "The body — physical capacity and health",
+      "corpus-":  { "description": "Fatigue — exhaustion, transient depletion" },
+      "corpus+":  { "description": "Standard corpus — baseline vitality" }
+    },
+
+    "anima":     { "icon": "🜍", "color": "#4040a0", "description": "" },
+    "sollertia": { "icon": "🜻", "color": "#97e3a7", "description": "" },
+    "aether":    { "icon": "🜕", "color": "#ffb333", "description": "Spiritual or willful contribution" },
+    "soul":      { "icon": "♙", "color": "#4455AA", "description": "Spiritual or willful contribution" }
   },
 
-  "stone": { "icon": "🪨", "color": "#808080", "description": "Rock, ore, mineral material" },
+  "features": {
+    "crafting": {
+      "icon": "🔨", "color": "#B07A3A", "description": "Construction and fabrication — building, shaping, assembling",
+      "builder": { "description": "Builder — assembles structures from materials" }
+    },
 
-  "metal": { "icon": "⬛", "color": "#A0A0A0", "description": "Processed or smelted metallic material" },
+    "fleeting":  { "icon": "⌛", "color": "#556677", "description": "Temporary — expires after a duration" },
 
-  "food": {
-    "icon": "🌾", "color": "#CCAA22", "description": "Sustenance, edible produce",
-    "berry": { "description": "" }
+    "level":     { "icon": "🎚", "color": "#C0A060", "description": "Tier / rank — used as a render index by cards whose object pack stores one variant per level (e.g. the alter tile)." },
+
+    "faction": {
+      "icon": "🚩", "color": "#888888",
+      "description": "Faction allegiance — sub-features pick a specific faction folder. A card carrying any descendant of `faction` renders with that descendant's folder (e.g. `master/<object>/chorus/`) instead of the local player's faction. Lets a designer ship faction-specific cards that look the same regardless of who holds them.",
+      "chorus":    { "description": "Chorus faction." },
+      "chord":     { "description": "Chord faction." },
+      "resonance": { "description": "Resonance faction." }
+    },
+
+    "speed":     { "icon": "💨", "color": "#9DCEE0", "description": "Movement allowance per turn. Spent against tile `cost` when the soul traverses the map." },
+
+    "inventory": { "icon": "🎒", "color": "#B07A3A", "description": "Has an inventory — click the card to open the bag of cards owned by it." }
   },
 
-  "flora": {
-    "icon": "🌿", "color": "#4A8B3E", "description": "Living plant matter — trees, bushes, undergrowth",
-    "brush": { "description": "Brush — tangled undergrowth" }
-  },
+  "traits": {
+    "cost":             { "description": "Movement cost paid to enter the tile. Higher values represent rougher or slower terrain." },
+    "height":           { "description": "Spatial elevation of the tile — affects lighting, reach, and terrain layering. Per-tile, not summed across a chain." },
 
-  "fire": {
-    "icon": "🔥", "color": "#CC3311", "description": "Combustible energy source",
-    "fuel": { "description": "" }
-  },
+    "elevation_min":    { "description": "Lower bound (inclusive) of the elevation envelope. [0, 1]. Cells whose sampled elevation falls below this exclude the tile from the candidate set. Omitted ⇒ 0 (no lower bound)." },
+    "elevation_max":    { "description": "Upper bound (inclusive) of the elevation envelope. [0, 1]. Omitted ⇒ 1 (no upper bound)." },
+    "temperature_min":  { "description": "Lower bound (inclusive) of the temperature envelope. [0, 1]. 0 = tundra, 1 = desert. Omitted ⇒ 0." },
+    "temperature_max":  { "description": "Upper bound (inclusive) of the temperature envelope. [0, 1]. Omitted ⇒ 1." },
+    "humidity_min":     { "description": "Lower bound (inclusive) of the humidity envelope. [0, 1]. 0 = arid, 1 = saturated. Omitted ⇒ 0." },
+    "humidity_max":     { "description": "Upper bound (inclusive) of the humidity envelope. [0, 1]. Omitted ⇒ 1." },
+    "aether_min":       { "description": "Lower bound (inclusive) of the aether-saturation envelope. [0, 1]. 0 = mundane, 1 = ley-line / resonance site. Omitted ⇒ 0." },
+    "aether_max":       { "description": "Upper bound (inclusive) of the aether-saturation envelope. [0, 1]. Omitted ⇒ 1." },
 
-  "water": { "icon": "💧", "color": "#1E6B9E", "description": "Fresh water — drinking, irrigation, flow" },
-
-  "corpus--": { "icon": "🜔", "color": "#E67E7E", "description": "Injuries — wounds, broken bones, lasting harm" },
-  "corpus++": { "icon": "🜔", "color": "#E67E7E", "description": "Enhanced corpus — vigor, heightened resilience" },
-  "corpus": {
-    "icon": "🜔", "color": "#E67E7E", "description": "The body — physical capacity and health",
-    "corpus-":  { "description": "Fatigue — exhaustion, transient depletion" },
-    "corpus+":  { "description": "Standard corpus — baseline vitality" }
-  },
-
-  "anima": {
-    "icon": "🜍", "color": "#FFD966", "description": ""
-  },
-
-  "sollertia": {
-    "icon": "🜻", "color": "#97e3a7", "description": ""
-  },
-
-  "aether": { "icon": "🜕", "color": "#7D96E3", "description": "Spiritual or willful contribution" },
-
-  "soul": { "icon": "♙", "color": "#4455AA", "description": "Spiritual or willful contribution" },
-
-  "fleeting": { "icon": "⌛", "color": "#556677", "description": "Temporary — expires after a duration" }
+    "rarity":           { "description": "Relative weight when multiple tiles share a cell's candidate set. Default 1.0." },
+    "coverage":         { "description": "Hex coverage role. 0 = decorator overlay, 1 = base tile (fills the hex). Read as boolean (`>= 0.5` is base). Omitted ⇒ 1." },
+    "cluster_group":    { "description": "Cluster group id — tiles sharing a non-zero value bias toward spawning adjacent to one another. 0 = no clustering (default)." },
+    "cluster_strength": { "description": "How much the cluster bias overrides the climate-only candidate roll. [0, 1]. 0 = clustering ignored; 1 = if any neighbor shares this group, this tile wins. Omitted ⇒ 0." }
+  }
 }

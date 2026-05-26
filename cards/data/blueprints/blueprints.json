@@ -3,7 +3,7 @@
   "blueprint": {
     "blueprint_nd_furnace": {
       "style": [ "#0A3D73", "#0B4F8A", "#E6F1FF" ],
-      "sprite": "128_blueprint_nd_furnace"
+      "object": { "name": "blueprint", "index": "nd_furnace" }
     }
   }
 }

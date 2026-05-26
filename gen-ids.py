@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-gen-ids.py — Generate stable ID mappings for recipes, cards, starter packs, blueprints, and textures.
+gen-ids.py — Generate stable ID mappings for recipes, cards, starter packs, and blueprints.
 
 Produces:
   recipes/id.json        { "<recipe-id>": <stable-int>, ... }
   cards/id.json          { "<card_type>": { "<key>": <definition_id>, ... } }
   starter_packs/id.json  { "<soul>": { "<pack_id>": <stable-int>, ... } }
   blueprints/id.json     { "<blueprint_key>": <stable-int>, ... }
-  textures/id.json       { "<card_type>": { "<key>": <texture_id>, ... } }
+
+(Texture ids retired by the card-object unification — render metadata
+co-locates on aspects in `cards/aspects.json`; texture ids regenerate
+from the aspect registry at build time.)
 
 Reads recipe / card / starter-pack / blueprint / texture definition files
 from `<root>/data/**/*.json` under each subsystem. Sibling metadata
@@ -387,18 +390,35 @@ def gen_starter_pack_ids(data_dir: Path, skip_known: bool) -> bool:
 
 
 def gen_blueprint_ids(data_dir: Path, skip_known: bool) -> bool:
-    """Blueprints share one flat id namespace, same shape as recipes —
-    `{ "<blueprint_key>": <stable-int>, ... }`. The body schema is
-    intentionally lax: this pass only collects the top-level keys for
-    id assignment. The Rust loader validates body fields (`blueprint`
-    card key + `card` output key) at registry-build time."""
-    blueprints_dir = data_dir / "blueprints"
+    """Soul-scope blueprints. Delegates to the shared scope walker
+    against `content/blueprints/`."""
+    return _gen_blueprint_scope_ids(data_dir, "blueprints", skip_known)
+
+
+def gen_player_blueprint_ids(data_dir: Path, skip_known: bool) -> bool:
+    """Player-scope blueprints — same shape as soul blueprints but
+    in a separate id namespace under `content/player_blueprints/`.
+    Card_type is `player_blueprint` (id=3); soul-scope uses
+    `blueprint` (id=1). Keeping the registries independent lets
+    both grow without def_id collisions and makes per-scope
+    enumeration (for the dna panel vs the wrench panel) trivial."""
+    return _gen_blueprint_scope_ids(data_dir, "player_blueprints", skip_known)
+
+
+def _gen_blueprint_scope_ids(data_dir: Path, subdir: str, skip_known: bool) -> bool:
+    """Blueprints share one flat id namespace per scope, same shape
+    as recipes — `{ "<blueprint_key>": <stable-int>, ... }`. The body
+    schema is intentionally lax: this pass only collects the top-
+    level keys for id assignment. The Rust loader validates body
+    fields (`blueprint` card key + `card` output key) at registry-
+    build time."""
+    blueprints_dir = data_dir / subdir
     defs_dir = blueprints_dir / "data"
     id_path = blueprints_dir / "id.json"
 
     if not defs_dir.exists():
-        # No blueprint data tree — nothing to generate. Skip silently.
-        print("  (no blueprints/data directory, skipping)")
+        # No data tree at this scope — nothing to generate. Skip silently.
+        print(f"  (no {subdir}/data directory, skipping)")
         return True
 
     if skip_known:
@@ -875,9 +895,18 @@ def main():
     if not gen_blueprint_ids(data_dir, args.skip_known):
         ok = False
 
-    print("Textures:")
-    if not gen_texture_ids(data_dir, args.skip_known):
+    print("Player Blueprints:")
+    if not gen_player_blueprint_ids(data_dir, args.skip_known):
         ok = False
+
+    # Textures: previously had their own id.json under
+    # `content/textures/id.json`, generated from a parallel
+    # `textures/data/` tree. Both retired by the card-object
+    # unification (docs/CARD_OBJECT_UNIFICATION.md) — render metadata
+    # now lives co-located on aspect entries in `cards/aspects.json`,
+    # and texture ids regenerate from the aspect order at
+    # registry-build time (client-only — never persisted, never on
+    # the wire, so id stability isn't required).
 
     print("Locales:")
     if not sync_locales(data_dir, verbose=args.verbose, purge_orphans=args.purge_orphans):

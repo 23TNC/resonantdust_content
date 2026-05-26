@@ -1,24 +1,40 @@
 {
-  "tile":{
+  "tile": {
     "building_nd_furnace": {
       "style": [ "#799E50", "#0b1426", "#0b1426" ],
-      "sprite": "256_nd_furnace",
-      "traits": {
-        "cost": 50
-      },
-      "stock": [
-        { "aspect": "fire", "max": 3, "default": 0 }
-      ]
+      "object": { "name": "nd_furnace" },
+      "stock": [ { "aspect": "fire", "max": 3, "default": 0 } ],
+      "aspects": { "cost": 50 }
     },
     "building_workbench": {
       "style": [ "#799E50", "#0b1426", "#0b1426" ],
-      "sprite": "256_workbench",
-      "traits": {
-        "cost": 50
-      },
-      "stock": [
-        { "aspect": "fire", "max": 3, "default": 0 }
-      ]
+      "object": { "name": "workbench" },
+      "stock": [ { "aspect": "fire", "max": 3, "default": 0 } ],
+      "aspects": { "cost": 50 }
+    },
+    "alter": {
+      "style": [ "#C0A060", "#0b1426", "#0b1426" ],
+      "object": { "name": "alter", "indexFromAspect": "level" },
+      "texture": { "name": "concrete" },
+      "aspects": { "level": 1, "cost": 50 }
+    },
+    "anima_fountain": {
+      "style": [ "#FFD966", "#0b1426", "#0b1426" ],
+      "object": { "name": "fountain", "index": "anima" },
+      "texture": { "name": "concrete" },
+      "aspects": { "anima": 1, "cost": 50 }
+    },
+    "aether_fountain": {
+      "style": [ "#7D96E3", "#0b1426", "#0b1426" ],
+      "object": { "name": "fountain", "index": "aether" },
+      "texture": { "name": "concrete" },
+      "aspects": { "aether": 1, "cost": 50 }
+    },
+    "table": {
+      "style": [ "#8B5E3C", "#0b1426", "#0b1426" ],
+      "object": { "name": "table_slab" },
+      "texture": { "name": "concrete" },
+      "aspects": { "cost": 30 }
     }
   }
 }

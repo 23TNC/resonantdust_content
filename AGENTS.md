@@ -35,6 +35,8 @@ slices that the registries iterate:
 | `cards/data/**/*.json` | `CARDS_FILES` |
 | `recipes/data/**/*.json` | `RECIPES_FILES` |
 | `starter_packs/data/**/*.json` | `STARTER_PACKS_FILES` |
+| `blueprints/data/**/*.json` | `BLUEPRINTS_FILES` (soul-scope blueprint catalog) |
+| `player_blueprints/data/**/*.json` | `PLAYER_BLUEPRINTS_FILES` (player-scope blueprint catalog — same entry shape, separate registry + id namespace so the two scopes can be enumerated independently) |
 | `locales/**/*.json` | `LOCALES_FILES` |
 
 **Adding, renaming, nesting, or removing a JSON file under any of those
@@ -66,6 +68,8 @@ content/
     lib.rs               # module roots + embedded_data slices
     packed.rs            # bit-packing helpers (packed_definition,
                          #   packed_recipe, macro_zone, micro_zone, …)
+                         #   incl. pack_nibbles/unpack_nibbles for the
+                         #   PlayerProfile [count:u4|max:u4] bytes
     definition_core.rs   # card / aspect / trait registries
     recipe_core.rs       # recipe registry + stack-match scorer
     flags_core.rs        # cards/flags.json registry (single-bit
@@ -73,12 +77,19 @@ content/
     locales_core.rs      # locales/**/*.json registry, dotted-path
                          #   lookups with English fallback
     starter_pack_core.rs # starter-pack registry
+    blueprint_core.rs    # blueprint registry — scoped via the
+                         #   BlueprintScope enum (Soul, Player); one
+                         #   OnceLock per scope, lookups take the
+                         #   scope as an arg (`blueprint(scope, id)`,
+                         #   `find_blueprint(scope, key)`,
+                         #   `blueprints_all(scope)`)
     wasm_api.rs          # JS-facing wasm-bindgen exports
                          #   (cfg(feature = "js"))
   cards/
     types.json         # card_type registry, with per-type visibility
-                       #   + shape (card_category retired — see
-                       #    docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md)
+                       #   + shape (the legacy card_category dimension
+                       #    has been retired — packed_definition is
+                       #    now [card_type:u4 | def_id:u12])
     aspects.json       # aspect catalog (i32-valued)
     traits.json        # trait catalog (f32-valued)
     flags.json         # bit-position registry for cards.flags
@@ -98,6 +109,14 @@ content/
   starter_packs/
     id.json            # stable id per (soul, pack_id) (generated)
     data/              # starter-pack definitions
+  blueprints/
+    id.json            # stable u16 id per soul-scope blueprint key
+                       #   (generated)
+    data/              # soul-scope blueprint definitions
+  player_blueprints/
+    id.json            # stable u16 id per player-scope blueprint key
+                       #   (generated; separate namespace from soul)
+    data/              # player-scope blueprint definitions
   locales/
     cards/<lang>.json     # display labels + descriptions per card
     recipes/<lang>.json   # display labels + success messages per recipe
@@ -116,7 +135,7 @@ content/
 
 | File | Status | Purpose |
 | --- | --- | --- |
-| [`cards/types.json`](cards/types.json) | live | `card_type` id registry. Each type carries `id`, `visibility` (`"public"`/`"private"`), `shape` (`"rect"`/`"hex"`), and an explanatory `_comment`. The `id < 4` cutoff in `_rules.public_max_id` is enforced by SpacetimeDB subscription filters (`packed_definition < 0x4000` → public types only). Shape drives [`is_hex_type`] and the rect-vs-hex chain machinery on the server. (The `categories` block is tombstoned — see [docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md](../docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md).) |
+| [`cards/types.json`](cards/types.json) | live | `card_type` id registry. Each type carries `id`, `visibility` (`"public"`/`"private"`), `shape` (`"rect"`/`"hex"`), and an explanatory `_comment`. The `id < 4` cutoff in `_rules.public_max_id` is enforced by SpacetimeDB subscription filters (`packed_definition < 0x4000` → public types only). Shape drives [`is_hex_type`] and the rect-vs-hex chain machinery on the server. (The `categories` block is tombstoned — `packed_definition` collapsed `[type:u4 | category:u4 | def_id:u8]` into `[type:u4 | def_id:u12]`.) |
 | [`cards/aspects.json`](cards/aspects.json) | live | Aspect catalog — the tags placed on cards (`labor`, `combat`, `fleeting`, …) grouped by domain. Server assigns 1-indexed `AspectId`s in JSON insertion order across groups (id 0 reserved as `ASPECT_NONE`). Aspect values on a card are `i32`. |
 | [`cards/traits.json`](cards/traits.json) | live | Trait catalog — same shape as aspects (top-level groups, `name: description` pairs) but for non-aggregating descriptive labels. Trait values on a card are `f32`. Today's traits: `tile.cost` (movement cost per terrain) and `soul.speed` (per-turn movement allowance). Read by `movement::tile_cost` on the server. |
 | [`cards/flags.json`](cards/flags.json) | live | Bit-position registry for the `cards.flags` u32 column (also has `actions` / `magnetic_actions` sections retained as historical context — those tables were retired in the magnetic rewrite). Two entry shapes: `"bit": n` for single-bit flags, `"bits": [low, …, high]` for contiguous multi-bit fields (e.g. `progress_style` at bits 8..=10, `position_hold_count` at 17..=19). Append-only — removed flags leave `_reserved_<bit>` tombstones. The `magnetic` flag at bit 12 maps to `FLAG_LIFECYCLE_PENDING` on the server (JSON name kept for stable-id discipline pending lifecycle rewrite phase 6). Both the server and the recipe parser (for `{"flag": "..."}` predicates) read this file via [`flags_core`](src/flags_core.rs). |
@@ -128,11 +147,15 @@ content/
 | [`recipes/data/**/*.json`](recipes/data/) | live | Recipe definitions. Auto-discovered. See [`recipes/AGENTS.md`](recipes/AGENTS.md). |
 | [`starter_packs/id.json`](starter_packs/id.json) | live, generated | Stable id per `(soul, pack_id)` pair, format `{ <soul>: { <pack_id>: <int> } }`. 1-indexed; `STARTER_PACK_NONE = 0`. Generated by `gen-ids.py`. |
 | [`starter_packs/data/**/*.json`](starter_packs/data/) | live | Starter-pack definitions — bundles of cards spawned at character creation. Each entry maps `(soul, pack_id) → { card_key: count }`. Card keys resolve via [`find_packed_by_key`](src/definition_core.rs); soul keys are validated as known card keys at registry-build time. |
+| [`blueprints/id.json`](blueprints/id.json) | live, generated | Stable u16 id per soul-scope blueprint key, `{ <key>: <int> }`. 1-indexed; `BLUEPRINT_NONE = 0`. Generated by `gen-ids.py`. |
+| [`blueprints/data/**/*.json`](blueprints/data/) | live | Soul-scope blueprint definitions — each entry maps a blueprint key to the catalog card it draws as (`blueprint`) and the card it builds (`card`). Discovered bit lives on `SoulPrivate.blueprints_0`; placement cap derived from the soul def's `aspects.builder` value. Resolved through the `BlueprintScope::Soul` arm of [`blueprint_core`](src/blueprint_core.rs). |
+| [`player_blueprints/id.json`](player_blueprints/id.json) | live, generated | Stable u16 id per player-scope blueprint key. Same shape as `blueprints/id.json`, separate namespace — soul-scope id 1 and player-scope id 1 are unrelated. Generated by `gen-ids.py`. |
+| [`player_blueprints/data/**/*.json`](player_blueprints/data/) | live | Player-scope blueprint definitions — same entry shape as soul-scope, but discovery bit lives on `PlayerProfile.blueprints_0` and cap comes from `PlayerProfile.blueprint_info.max`. Spawned cards carry `card_type = player_blueprint (3)` and `FLAG_OWNED_BY_PLAYER`. Resolved through the `BlueprintScope::Player` arm of [`blueprint_core`](src/blueprint_core.rs). |
 | [`locales/cards/<lang>.json`](locales/cards/) | live | Display labels + descriptions for cards, keyed by `<card_type>.<category>.<key>` matching `cards/id.json`'s nesting. Each leaf object has a required `label` and optional `description.simple` / `description.detailed`. English (`en`) is the fallback language. |
 | [`locales/recipes/<lang>.json`](locales/recipes/) | live | Same shape, keyed by `<recipe_type>.<category>.<key>`. Leaves carry `label` plus optional `success.simple` (the event-log line on successful completion). |
 | [`zones/biomes.json`](zones/biomes.json) | live | Biome registry for procedural map generation. Each biome has a center in climate space (`temperature`, `humidity` ∈ `[0, 1]`) and a weighted tile distribution (keys resolved through `cards/id.json` under `tile/default/<key>`). The map generator samples a climate vector per cell, weights biomes by inverse-square distance from the cell's climate point, blends their tile distributions, and weighted-picks a `definition_id`. **Read by the server, not by the content crate.** Biomes are category-agnostic — the zone's category byte selects the visual variant. |
 | [`bootstrap/bootstrap.json`](bootstrap/bootstrap.json) | live, stub | Seed data loaded by the dev-only `bootstrap` reducer in [`spacetime/server/spacetimedb/src/debug.rs`](../spacetime/server/spacetimedb/src/debug.rs). Currently a stub — only a top-level `card: [<key>, …]` array remains; each entry resolves through `cards/id.json` and lands in the first player's inventory. The prior `player` / `zones` sections were removed. |
-| [`gen-ids.py`](gen-ids.py) | tooling | Generates `cards/id.json`, `recipes/id.json`, and `starter_packs/id.json` by recursively walking `cards/data/`, `recipes/data/`, and `starter_packs/data/`. Default mode reassigns IDs every run; `--skip-known` preserves existing ids and appends only new entries (the append-only, tombstone-removed-entries discipline you want once wire-format ids matter). Run before `bin/content build` whenever you add or remove cards / recipes / packs — the registries refuse to load entries missing from these files. |
+| [`gen-ids.py`](gen-ids.py) | tooling | Generates `cards/id.json`, `recipes/id.json`, `starter_packs/id.json`, `blueprints/id.json`, `player_blueprints/id.json`, and `textures/id.json` by recursively walking the corresponding `data/` trees. The two blueprint passes share a helper (`_gen_blueprint_scope_ids`) so soul-scope and player-scope catalogs allocate ids in the same shape — independent namespaces, both 1-indexed. Default mode reassigns IDs every run; `--skip-known` preserves existing ids and appends only new entries (the append-only, tombstone-removed-entries discipline you want once wire-format ids matter). Run before `bin/content build` whenever you add or remove cards / recipes / packs / blueprints — the registries refuse to load entries missing from these files. |
 
 ## `bin/content` — the build wrapper
 
@@ -177,12 +200,13 @@ The host `cargo` is not invoked.
   `TraitId`, `definition_id`, `StarterPackId`, and the recipe id field
   inside `pack_recipe` are all 1-indexed; 0 in any of those contexts
   means "no entry".
-- **Adding cards / recipes / starter packs requires running `gen-ids.py`.**
+- **Adding cards / recipes / starter packs / blueprints requires running `gen-ids.py`.**
   The registries reject entries that aren't in `cards/id.json` /
-  `recipes/id.json` / `starter_packs/id.json` with a clear "run
-  gen-ids.py" error message. `bin/content check` runs it automatically
-  before checking — running it directly is only needed if you want to
-  inspect the resulting id assignments without compiling.
+  `recipes/id.json` / `starter_packs/id.json` / `blueprints/id.json` /
+  `player_blueprints/id.json` with a clear "run gen-ids.py" error
+  message. `bin/content check` runs it automatically before checking
+  — running it directly is only needed if you want to inspect the
+  resulting id assignments without compiling.
 - **Reserved card keys.** Card keys cannot be `"any"` (recipe-side
   wildcard sentinel) and cannot start with `@` (recipe-side card-type
   prefix). The current data trips neither.

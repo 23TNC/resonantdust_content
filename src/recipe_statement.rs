@@ -258,6 +258,7 @@ pub const RESERVED_PATH_TOKENS: &[&str] = &[
   "random",
   // Locations
   "inventory",
+  "stack",
   // Duration tier markers (legacy)
   "default",
   "when",

@@ -21,7 +21,10 @@ use crate::definition_core::{
   is_hex_type as core_is_hex_type,
 };
 use crate::flags_core::{
-  card_flag_bit as core_card_flag_bit, card_flag_field as core_card_flag_field,
+  card_flag_bit as core_card_flag_bit,
+  card_flag_field as core_card_flag_field,
+  flag_bit as core_flag_bit,
+  flag_field as core_flag_field,
 };
 use crate::recipe_core::{
   find_recipe as core_find_recipe,
@@ -36,6 +39,7 @@ use crate::blueprint_core::{
   blueprint as core_blueprint,
   blueprints_all as core_blueprints_all,
   find_blueprint as core_find_blueprint,
+  BlueprintScope,
 };
 use crate::texture_core::textures as core_textures;
 
@@ -110,14 +114,36 @@ pub fn card_label(packed_def: u16, lang: &str) -> Result<Option<String>, JsValue
   Ok(label.map(String::from))
 }
 
-/// Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
-/// `"position_locked"`, `"dead"`). Returns `undefined` if no flag with
-/// that name is declared in `cards/flags.json`. Throws on registry-build
-/// failure. JS-side callers typically convert to a mask via
-/// `1 << bit` before testing against `row.flags`.
+/// **Legacy** — bit position (0..=31) of a card-flag by name, searched
+/// across both `cards_state` and `cards_bk` fields (state first).
+/// Returns `undefined` if no single-bit flag with that name exists in
+/// either field. Ambiguous against the split-field schema — callers
+/// that need to know which host integer the bit lives in should use
+/// [`cardFlagBitIn`] with an explicit field name instead.
 #[wasm_bindgen(js_name = cardFlagBit)]
 pub fn card_flag_bit(name: &str) -> Result<Option<u8>, JsValue> {
   core_card_flag_bit(name).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Bit position (0..=31) of a single-bit flag in a specific field.
+/// `field` is `"cards_state"` or `"cards_bk"`. Returns `undefined` if
+/// no single-bit flag with that name is declared in the given field.
+/// Preferred over [`cardFlagBit`] for new call sites — explicit field
+/// argument means lookups can't accidentally collide across fields.
+#[wasm_bindgen(js_name = cardFlagBitIn)]
+pub fn card_flag_bit_in(field: &str, name: &str) -> Result<Option<u8>, JsValue> {
+  core_flag_bit(field, name).map_err(|e| JsValue::from_str(&e))
+}
+
+/// `(shift, width)` of a multi-bit flag field in a specific field.
+/// Returns `undefined` if no multi-bit field with that name is
+/// declared in the given field. Use the returned pair to mask:
+/// `mask = ((1 << width) - 1) << shift`, value extract:
+/// `(host >> shift) & ((1 << width) - 1)`.
+#[wasm_bindgen(js_name = cardFlagFieldShape)]
+pub fn card_flag_field_shape(field: &str, name: &str) -> Result<Option<Vec<u8>>, JsValue> {
+  let f = core_flag_field(field, name).map_err(|e| JsValue::from_str(&e))?;
+  Ok(f.map(|f| vec![f.shift, f.width]))
 }
 
 /// Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
@@ -130,40 +156,86 @@ pub fn card_type_id(name: &str) -> Result<Option<u8>, JsValue> {
   Ok(ids.get(name).copied())
 }
 
-/// Read the value of a multi-bit card-flag field (e.g.
-/// `"progress_style"`, `"position_hold_count"`) out of a `flags`
-/// u32. Returns `undefined` if no field with that name is declared in
-/// `cards/flags.json`; returns the extracted unsigned value
-/// otherwise. Throws on registry-build failure.
-///
-/// Equivalent to `(flags >> field.shift) & field.mask`. JS-side
-/// callers checking "is the count > 0?" use `value > 0`; callers
-/// reading specific enum-style values (`progress_style == 1`)
-/// compare directly.
+/// **Legacy** — read the value of a multi-bit card-flag field by
+/// name, searching across both `cards_state` and `cards_bk` (state
+/// first). Caller passes a single `flags` u32 that should be the
+/// matching host integer; ambiguous against the split-field schema.
+/// Prefer [`cardFlagFieldValueIn`] with an explicit field name for
+/// new call sites.
 #[wasm_bindgen(js_name = cardFlagFieldValue)]
 pub fn card_flag_field_value(flags: u32, name: &str) -> Result<Option<u32>, JsValue> {
   let field = core_card_flag_field(name).map_err(|e| JsValue::from_str(&e))?;
   Ok(field.map(|f| (flags & f.mask()) >> f.shift as u32))
 }
 
-/// Read the numeric value of a named trait off a packed card
+/// Read the value of a multi-bit field in a specific host integer.
+/// `field` is `"cards_state"` or `"cards_bk"`; `host` is the value
+/// of the corresponding `Card.flags_state` / `Card.flags_bk` column.
+/// Returns `undefined` if no multi-bit field with that name is
+/// declared in the given field.
+#[wasm_bindgen(js_name = cardFlagFieldValueIn)]
+pub fn card_flag_field_value_in(
+  field: &str,
+  host: u32,
+  name: &str,
+) -> Result<Option<u32>, JsValue> {
+  let f = core_flag_field(field, name).map_err(|e| JsValue::from_str(&e))?;
+  Ok(f.map(|f| (host & f.mask()) >> f.shift as u32))
+}
+
+/// Field-routing helper — given **both** flag host integers and a
+/// flag name, returns `true` if the named single-bit flag is set in
+/// whichever field declares it. Looks up `cards_state` first then
+/// `cards_bk`; consults only the matching host. Callers pass the
+/// whole `(state, bk)` pair from the card row so the lookup is
+/// unambiguous against the split schema.
+///
+/// Returns `false` for unknown flag names (the safe default for
+/// "absent") and for cards whose bit is clear in the matching host.
+#[wasm_bindgen(js_name = hasCardFlag)]
+pub fn has_card_flag(state: u32, bk: u32, name: &str) -> Result<bool, JsValue> {
+  if let Some(bit) = core_flag_bit("cards_state", name).map_err(|e| JsValue::from_str(&e))? {
+    return Ok(state & (1u32 << bit) != 0);
+  }
+  if let Some(bit) = core_flag_bit("cards_bk", name).map_err(|e| JsValue::from_str(&e))? {
+    return Ok(bk & (1u32 << bit) != 0);
+  }
+  Ok(false)
+}
+
+/// Field-routing helper for multi-bit fields — given both host
+/// integers and a field name, returns the extracted value from
+/// whichever field declares it (state-first lookup). Returns
+/// `undefined` for unknown field names.
+#[wasm_bindgen(js_name = cardFlagFieldValueAny)]
+pub fn card_flag_field_value_any(state: u32, bk: u32, name: &str) -> Result<Option<u32>, JsValue> {
+  if let Some(f) = core_flag_field("cards_state", name).map_err(|e| JsValue::from_str(&e))? {
+    return Ok(Some((state & f.mask()) >> f.shift as u32));
+  }
+  if let Some(f) = core_flag_field("cards_bk", name).map_err(|e| JsValue::from_str(&e))? {
+    return Ok(Some((bk & f.mask()) >> f.shift as u32));
+  }
+  Ok(None)
+}
+
+/// Read the numeric value of a named aspect off a packed card
 /// definition. Returns `null` when:
-/// - the trait name isn't in `traits.json`,
-/// - the def doesn't carry that trait,
+/// - the aspect name isn't in `aspects.json`,
+/// - the def doesn't carry that aspect,
 /// - or the packed def doesn't resolve to a registered card.
 ///
 /// Source-of-truth pair with the server's
-/// `def.trait_value(trait_id("name"))` path — both go through the
-/// same `CardDefinition::trait_value` lookup, so client and server
-/// agree on cost / speed numbers by construction.
+/// `def.aspect_value(aspect_id("name"))` path — both go through the
+/// same `CardDefinition::aspect_value` lookup, so client and server
+/// agree on cost / speed / inventory / etc. numbers by construction.
 ///
 /// Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
 /// resolve per-tile `cost` and per-soul `speed` for the step-time
 /// calculation, mirroring the server validator in
 /// `movement::move_soul_path`.
-#[wasm_bindgen(js_name = traitValue)]
-pub fn trait_value(packed_def: u16, name: &str) -> Result<Option<f32>, JsValue> {
-  let trait_id = match crate::definition_core::trait_id(name)
+#[wasm_bindgen(js_name = aspectValue)]
+pub fn aspect_value(packed_def: u16, name: &str) -> Result<Option<f32>, JsValue> {
+  let aid = match crate::definition_core::aspect_id(name)
     .map_err(|e| JsValue::from_str(&e))?
   {
     Some(id) => id,
@@ -175,7 +247,7 @@ pub fn trait_value(packed_def: u16, name: &str) -> Result<Option<f32>, JsValue> 
     Some(d) => d,
     None => return Ok(None),
   };
-  Ok(def.trait_value(trait_id))
+  Ok(def.aspect_value(aid))
 }
 
 /// Look up a recipe by its stable `u16` id (the value
@@ -286,13 +358,12 @@ pub fn starter_blueprints_for_soul(soul: &str) -> Result<Vec<u16>, JsValue> {
   core_starter_blueprints_for_soul(soul).map_err(|e| JsValue::from_str(&e))
 }
 
-/// Look up a blueprint by its stable `u16` id. Returns the full
-/// Blueprint object (`id`, `key`, `cardKey`, `cardPackedDefinition`)
-/// or `null` if the id isn't registered. Throws on registry-build
-/// failure.
+/// Look up a soul-scope blueprint by its stable `u16` id. Returns
+/// the full Blueprint object or `null` if the id isn't registered.
+/// Throws on registry-build failure.
 #[wasm_bindgen(js_name = blueprintById)]
 pub fn blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
-  let opt = core_blueprint(id).map_err(|e| JsValue::from_str(&e))?;
+  let opt = core_blueprint(BlueprintScope::Soul, id).map_err(|e| JsValue::from_str(&e))?;
   match opt {
     Some(bp) => serde_wasm_bindgen::to_value(bp)
       .map_err(|e| JsValue::from_str(&e.to_string())),
@@ -300,12 +371,11 @@ pub fn blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
   }
 }
 
-/// Look up a blueprint by its source-key (e.g. `"nd_furnace"`).
-/// Returns the full Blueprint object or `null` if no blueprint with
-/// that key is registered. Throws on registry-build failure.
+/// Look up a soul-scope blueprint by its source-key. Returns the
+/// full Blueprint object or `null`. Throws on registry-build failure.
 #[wasm_bindgen(js_name = blueprintByKey)]
 pub fn blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
-  let opt = core_find_blueprint(key).map_err(|e| JsValue::from_str(&e))?;
+  let opt = core_find_blueprint(BlueprintScope::Soul, key).map_err(|e| JsValue::from_str(&e))?;
   match opt {
     Some(bp) => serde_wasm_bindgen::to_value(bp)
       .map_err(|e| JsValue::from_str(&e.to_string())),
@@ -313,26 +383,57 @@ pub fn blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
   }
 }
 
-/// Every registered blueprint in stable-id order. Returns an array of
-/// `Blueprint` objects; empty when no blueprints are declared. Throws
-/// on registry-build failure.
-///
-/// Called by the wrench panel to enumerate the catalog for display —
-/// each entry's `cardPackedDefinition` resolves directly through
-/// `decodeDefinition` / `cardLabel` for the card-side visuals.
+/// Every registered soul-scope blueprint in stable-id order.
+/// Called by the wrench panel to enumerate the catalog for display.
 #[wasm_bindgen(js_name = allBlueprints)]
 pub fn all_blueprints() -> Result<JsValue, JsValue> {
-  let bps = core_blueprints_all().map_err(|e| JsValue::from_str(&e))?;
+  let bps = core_blueprints_all(BlueprintScope::Soul).map_err(|e| JsValue::from_str(&e))?;
+  serde_wasm_bindgen::to_value(&bps).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Player-scope analog of [`blueprint_by_id`].
+#[wasm_bindgen(js_name = playerBlueprintById)]
+pub fn player_blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
+  let opt = core_blueprint(BlueprintScope::Player, id).map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(bp) => serde_wasm_bindgen::to_value(bp)
+      .map_err(|e| JsValue::from_str(&e.to_string())),
+    None => Ok(JsValue::NULL),
+  }
+}
+
+/// Player-scope analog of [`blueprint_by_key`].
+#[wasm_bindgen(js_name = playerBlueprintByKey)]
+pub fn player_blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
+  let opt = core_find_blueprint(BlueprintScope::Player, key).map_err(|e| JsValue::from_str(&e))?;
+  match opt {
+    Some(bp) => serde_wasm_bindgen::to_value(bp)
+      .map_err(|e| JsValue::from_str(&e.to_string())),
+    None => Ok(JsValue::NULL),
+  }
+}
+
+/// Player-scope analog of [`all_blueprints`]. Called by the dna
+/// (🧬) panel to enumerate the player-blueprint catalog.
+#[wasm_bindgen(js_name = allPlayerBlueprints)]
+pub fn all_player_blueprints() -> Result<JsValue, JsValue> {
+  let bps = core_blueprints_all(BlueprintScope::Player).map_err(|e| JsValue::from_str(&e))?;
   serde_wasm_bindgen::to_value(&bps).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Every registered texture definition, in stable-id order. Each entry
-/// carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
-/// `size`, and `scale: { min, max }`. Returns an empty array when no
-/// textures are registered. Throws on registry-build failure.
+/// carries `id`, `aspectId`, `aspectName`, `size`,
+/// `scale: { min, max }`, and `anchor: { x, y }`. Returns an empty
+/// array when no aspect carries render metadata. Throws on
+/// registry-build failure.
 ///
-/// Called once at startup by `TextureRegistry.ts` to build the client-side
-/// lookup map; not intended for per-frame use.
+/// Post card-object unification (see
+/// docs/CARD_OBJECT_UNIFICATION.md) entries are aspect-keyed and the
+/// pack-folder on disk is named `<size>_<aspectName>_pack/` — pack
+/// name and aspect name are the same string.
+///
+/// Called once at startup by `TextureRegistry.ts` to build the
+/// client-side lookup map; not intended for per-frame use.
 #[wasm_bindgen(js_name = allTextures)]
 pub fn all_textures() -> Result<JsValue, JsValue> {
   let txs = core_textures().map_err(|e| JsValue::from_str(&e))?;

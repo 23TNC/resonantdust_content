@@ -21,37 +21,54 @@
     "anima-": 11,
     "anima+": 12
   },
+  "player_blueprint": {
+    "player_blueprint_soul_slot": 1
+  },
   "requisite": {
     "axe": 1,
     "pickaxe": 2,
     "log": 3,
     "stick": 4,
-    "stone": 5
+    "stone": 5,
+    "dust": 6,
+    "food": 7,
+    "reliquary": 8,
+    "corpse": 9,
+    "corpse_chorus": 10,
+    "corpse_chord": 11,
+    "corpse_resonance": 12
   },
   "revery": {
     "dread": 1
   },
   "soul": {
-    "human": 1
+    "human": 1,
+    "human_builder": 2
   },
   "tile": {
     "building_nd_furnace": 1,
     "building_workbench": 2,
-    "desert_1": 3,
-    "desert_2": 4,
-    "desert_3": 5,
-    "desert_4": 6,
-    "forest_1": 7,
-    "forest_2": 8,
-    "forest_3": 9,
-    "forest_4": 10,
-    "mountain_1": 11,
-    "mountain_2": 12,
-    "mountain_3": 13,
-    "mountain_4": 14,
-    "plains_1": 15,
-    "plains_2": 16,
-    "plains_3": 17,
-    "plains_4": 18
+    "alter": 3,
+    "anima_fountain": 4,
+    "aether_fountain": 5,
+    "table": 6,
+    "empty": 7,
+    "concrete": 8,
+    "desert_1": 9,
+    "desert_2": 10,
+    "desert_3": 11,
+    "desert_4": 12,
+    "forest_1": 13,
+    "forest_2": 14,
+    "forest_3": 15,
+    "forest_4": 16,
+    "mountain_1": 17,
+    "mountain_2": 18,
+    "mountain_3": 19,
+    "mountain_4": 20,
+    "plains_1": 21,
+    "plains_2": 22,
+    "plains_3": 23,
+    "plains_4": 24
   }
 }

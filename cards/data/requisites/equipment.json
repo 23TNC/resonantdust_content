@@ -1,13 +1,14 @@
 {
-  "_comment": "🪓⛏🔨🪏",
+  "_comment": "🪓⛏🔨🪏👁🧬⚙⛭⛯🧰🎒👜📦📊▲▼◁▷△▽🞁🞂🞃🞀▢▣🞎🗹🗷🗵🗟",
+  "_checkmarks": "🞎🗷🗹🞎",
   "requisite": {
     "axe": {
       "style": [ "#8B5E3C", "#ecd6aa", "#0b1426" ],
-      "sprite": "128_requisite_8"
+      "object": { "name": "requisite", "index": "axe" }
     },
     "pickaxe": {
       "style": [ "#8A857C", "#ecd6aa", "#0b1426" ],
-      "sprite": "128_requisite_9"
+      "object": { "name": "requisite", "index": "pickaxe" }
     }
   }
 }

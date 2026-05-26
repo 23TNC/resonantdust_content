@@ -11,5 +11,6 @@
   "fleeting": 10,
   "cut_tree": 11,
   "stick": 12,
-  "break_rock": 13
+  "break_rock": 13,
+  "chorus_attune": 14
 }

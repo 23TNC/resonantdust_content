@@ -1,4 +1,5 @@
 {
+  "_comment": "Card labels and descriptions. Top-level keys are card types; each card's `label` is rendered as the card's title bar text. KEEP LABELS ≤ 10 CHARACTERS so they fit the title-bar width without truncating or wrapping. Descriptions (`description.simple`) have no length limit — they render in the details panel's expanded state. The `simple` slot is the only one consumed today; reserved for future tiered descriptions (`detailed`, `lore`, etc.).",
   "requisite": {
     "log": {
       "label": "Log",
@@ -26,6 +27,33 @@
     },
     "stick": {
       "label": "stick"
+    },
+    "food": {
+      "label": "Food",
+      "description": {
+        "simple": "Edible produce — sustenance for the journey."
+      }
+    },
+    "reliquary": {
+      "label": "Reliquary",
+      "description": {
+        "simple": "An ornate vessel — sanctified to hold spiritual relics."
+      }
+    },
+    "dust": {
+      "label": "dust"
+    },
+    "corpse": {
+      "label": "Corpse"
+    },
+    "corpse_chorus": {
+      "label": "Corpse"
+    },
+    "corpse_chord": {
+      "label": "Offline"
+    },
+    "corpse_resonance": {
+      "label": "Corpse"
     }
   },
   "event": {
@@ -136,6 +164,9 @@
       "description": {
         "simple": "An ordinary mortal — adaptable, balanced across every faculty."
       }
+    },
+    "human_builder": {
+      "label": "human_builder"
     }
   },
   "tile": {
@@ -216,11 +247,43 @@
     },
     "building_workbench": {
       "label": "building_workbench"
+    },
+    "alter": {
+      "label": "Alter",
+      "description": {
+        "simple": "A consecrated structure at the heart of the pocket dimension. Its appearance changes as its level rises."
+      }
+    },
+    "empty": {
+      "label": "empty"
+    },
+    "concrete": {
+      "label": "Concrete",
+      "description": {
+        "simple": "A paved surface — flat, walkable, easy to build on."
+      }
+    },
+    "anima_fountain": {
+      "label": "anima_fountain"
+    },
+    "aether_fountain": {
+      "label": "aether_fountain"
+    },
+    "table": {
+      "label": "Table",
+      "description": {
+        "simple": "A flat stone slab — workspace for crafts and rituals."
+      }
     }
   },
   "blueprint": {
     "blueprint_nd_furnace": {
       "label": "Furnace"
+    }
+  },
+  "player_blueprint": {
+    "player_blueprint_soul_slot": {
+      "label": "player_blueprint_soul_slot"
     }
   }
 }

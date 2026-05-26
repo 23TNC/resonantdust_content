@@ -11,7 +11,8 @@
       "slot.1.0.destroy",
       "slot.0.0.aspect.wood.sub: 1",
       "slot.1.0.owner.inventory.create: corpus-",
-      "slot.1.0.owner.inventory.create: log"
+      "slot.1.0.owner.inventory.create: log",
+      "slot.1.0.owner.blueprint.unlock: nd_furnace"
     ]
   },
   "stick": {

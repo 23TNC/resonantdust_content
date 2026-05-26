@@ -1,13 +1,8 @@
 /* @ts-self-types="./resonantdust_content.d.ts" */
 
 /**
- * Every registered blueprint in stable-id order. Returns an array of
- * `Blueprint` objects; empty when no blueprints are declared. Throws
- * on registry-build failure.
- *
- * Called by the wrench panel to enumerate the catalog for display —
- * each entry's `cardPackedDefinition` resolves directly through
- * `decodeDefinition` / `cardLabel` for the card-side visuals.
+ * Every registered soul-scope blueprint in stable-id order.
+ * Called by the wrench panel to enumerate the catalog for display.
  * @returns {any}
  */
 export function allBlueprints() {
@@ -19,13 +14,32 @@ export function allBlueprints() {
 }
 
 /**
+ * Player-scope analog of [`all_blueprints`]. Called by the dna
+ * (🧬) panel to enumerate the player-blueprint catalog.
+ * @returns {any}
+ */
+export function allPlayerBlueprints() {
+    const ret = wasm.allPlayerBlueprints();
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Every registered texture definition, in stable-id order. Each entry
- * carries `id`, `cardType`, `aspectId`, `aspectName`, `object`,
- * `size`, and `scale: { min, max }`. Returns an empty array when no
- * textures are registered. Throws on registry-build failure.
+ * carries `id`, `aspectId`, `aspectName`, `size`,
+ * `scale: { min, max }`, and `anchor: { x, y }`. Returns an empty
+ * array when no aspect carries render metadata. Throws on
+ * registry-build failure.
  *
- * Called once at startup by `TextureRegistry.ts` to build the client-side
- * lookup map; not intended for per-frame use.
+ * Post card-object unification (see
+ * docs/CARD_OBJECT_UNIFICATION.md) entries are aspect-keyed and the
+ * pack-folder on disk is named `<size>_<aspectName>_pack/` — pack
+ * name and aspect name are the same string.
+ *
+ * Called once at startup by `TextureRegistry.ts` to build the
+ * client-side lookup map; not intended for per-frame use.
  * @returns {any}
  */
 export function allTextures() {
@@ -76,10 +90,39 @@ export function aspectInfo(id) {
 }
 
 /**
- * Look up a blueprint by its stable `u16` id. Returns the full
- * Blueprint object (`id`, `key`, `cardKey`, `cardPackedDefinition`)
- * or `null` if the id isn't registered. Throws on registry-build
- * failure.
+ * Read the numeric value of a named aspect off a packed card
+ * definition. Returns `null` when:
+ * - the aspect name isn't in `aspects.json`,
+ * - the def doesn't carry that aspect,
+ * - or the packed def doesn't resolve to a registered card.
+ *
+ * Source-of-truth pair with the server's
+ * `def.aspect_value(aspect_id("name"))` path — both go through the
+ * same `CardDefinition::aspect_value` lookup, so client and server
+ * agree on cost / speed / inventory / etc. numbers by construction.
+ *
+ * Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
+ * resolve per-tile `cost` and per-soul `speed` for the step-time
+ * calculation, mirroring the server validator in
+ * `movement::move_soul_path`.
+ * @param {number} packed_def
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function aspectValue(packed_def, name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.aspectValue(packed_def, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
+}
+
+/**
+ * Look up a soul-scope blueprint by its stable `u16` id. Returns
+ * the full Blueprint object or `null` if the id isn't registered.
+ * Throws on registry-build failure.
  * @param {number} id
  * @returns {any}
  */
@@ -92,9 +135,8 @@ export function blueprintById(id) {
 }
 
 /**
- * Look up a blueprint by its source-key (e.g. `"nd_furnace"`).
- * Returns the full Blueprint object or `null` if no blueprint with
- * that key is registered. Throws on registry-build failure.
+ * Look up a soul-scope blueprint by its source-key. Returns the
+ * full Blueprint object or `null`. Throws on registry-build failure.
  * @param {string} key
  * @returns {any}
  */
@@ -109,11 +151,12 @@ export function blueprintByKey(key) {
 }
 
 /**
- * Bit position (0..=7) of a card-flag by name (e.g. `"drop_hold"`,
- * `"position_locked"`, `"dead"`). Returns `undefined` if no flag with
- * that name is declared in `cards/flags.json`. Throws on registry-build
- * failure. JS-side callers typically convert to a mask via
- * `1 << bit` before testing against `row.flags`.
+ * **Legacy** — bit position (0..=31) of a card-flag by name, searched
+ * across both `cards_state` and `cards_bk` fields (state first).
+ * Returns `undefined` if no single-bit flag with that name exists in
+ * either field. Ambiguous against the split-field schema — callers
+ * that need to know which host integer the bit lives in should use
+ * [`cardFlagBitIn`] with an explicit field name instead.
  * @param {string} name
  * @returns {number | undefined}
  */
@@ -128,16 +171,61 @@ export function cardFlagBit(name) {
 }
 
 /**
- * Read the value of a multi-bit card-flag field (e.g.
- * `"progress_style"`, `"position_hold_count"`) out of a `flags`
- * u32. Returns `undefined` if no field with that name is declared in
- * `cards/flags.json`; returns the extracted unsigned value
- * otherwise. Throws on registry-build failure.
- *
- * Equivalent to `(flags >> field.shift) & field.mask`. JS-side
- * callers checking "is the count > 0?" use `value > 0`; callers
- * reading specific enum-style values (`progress_style == 1`)
- * compare directly.
+ * Bit position (0..=31) of a single-bit flag in a specific field.
+ * `field` is `"cards_state"` or `"cards_bk"`. Returns `undefined` if
+ * no single-bit flag with that name is declared in the given field.
+ * Preferred over [`cardFlagBit`] for new call sites — explicit field
+ * argument means lookups can't accidentally collide across fields.
+ * @param {string} field
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function cardFlagBitIn(field, name) {
+    const ptr0 = passStringToWasm0(field, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.cardFlagBitIn(ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === 0xFFFFFF ? undefined : ret[0];
+}
+
+/**
+ * `(shift, width)` of a multi-bit flag field in a specific field.
+ * Returns `undefined` if no multi-bit field with that name is
+ * declared in the given field. Use the returned pair to mask:
+ * `mask = ((1 << width) - 1) << shift`, value extract:
+ * `(host >> shift) & ((1 << width) - 1)`.
+ * @param {string} field
+ * @param {string} name
+ * @returns {Uint8Array | undefined}
+ */
+export function cardFlagFieldShape(field, name) {
+    const ptr0 = passStringToWasm0(field, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.cardFlagFieldShape(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v3;
+    if (ret[0] !== 0) {
+        v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v3;
+}
+
+/**
+ * **Legacy** — read the value of a multi-bit card-flag field by
+ * name, searching across both `cards_state` and `cards_bk` (state
+ * first). Caller passes a single `flags` u32 that should be the
+ * matching host integer; ambiguous against the split-field schema.
+ * Prefer [`cardFlagFieldValueIn`] with an explicit field name for
+ * new call sites.
  * @param {number} flags
  * @param {string} name
  * @returns {number | undefined}
@@ -146,6 +234,49 @@ export function cardFlagFieldValue(flags, name) {
     const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.cardFlagFieldValue(flags, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
+}
+
+/**
+ * Field-routing helper for multi-bit fields — given both host
+ * integers and a field name, returns the extracted value from
+ * whichever field declares it (state-first lookup). Returns
+ * `undefined` for unknown field names.
+ * @param {number} state
+ * @param {number} bk
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function cardFlagFieldValueAny(state, bk, name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.cardFlagFieldValueAny(state, bk, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
+}
+
+/**
+ * Read the value of a multi-bit field in a specific host integer.
+ * `field` is `"cards_state"` or `"cards_bk"`; `host` is the value
+ * of the corresponding `Card.flags_state` / `Card.flags_bk` column.
+ * Returns `undefined` if no multi-bit field with that name is
+ * declared in the given field.
+ * @param {string} field
+ * @param {number} host
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+export function cardFlagFieldValueIn(field, host, name) {
+    const ptr0 = passStringToWasm0(field, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.cardFlagFieldValueIn(ptr0, len0, host, ptr1, len1);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -226,6 +357,31 @@ export function findPackedByKey(key) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] === 0xFFFFFF ? undefined : ret[0];
+}
+
+/**
+ * Field-routing helper — given **both** flag host integers and a
+ * flag name, returns `true` if the named single-bit flag is set in
+ * whichever field declares it. Looks up `cards_state` first then
+ * `cards_bk`; consults only the matching host. Callers pass the
+ * whole `(state, bk)` pair from the card row so the lookup is
+ * unambiguous against the split schema.
+ *
+ * Returns `false` for unknown flag names (the safe default for
+ * "absent") and for cards whose bit is clear in the matching host.
+ * @param {number} state
+ * @param {number} bk
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function hasCardFlag(state, bk, name) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.hasCardFlag(state, bk, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
 }
 
 /**
@@ -336,6 +492,34 @@ export function packValidAt(time_ms, sequence) {
 export function packZoneDefinition(card_type) {
     const ret = wasm.packZoneDefinition(card_type);
     return ret;
+}
+
+/**
+ * Player-scope analog of [`blueprint_by_id`].
+ * @param {number} id
+ * @returns {any}
+ */
+export function playerBlueprintById(id) {
+    const ret = wasm.playerBlueprintById(id);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Player-scope analog of [`blueprint_by_key`].
+ * @param {string} key
+ * @returns {any}
+ */
+export function playerBlueprintByKey(key) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.playerBlueprintByKey(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -458,36 +642,6 @@ export function starterPacksForSoul(soul) {
 }
 
 /**
- * Read the numeric value of a named trait off a packed card
- * definition. Returns `null` when:
- * - the trait name isn't in `traits.json`,
- * - the def doesn't carry that trait,
- * - or the packed def doesn't resolve to a registered card.
- *
- * Source-of-truth pair with the server's
- * `def.trait_value(trait_id("name"))` path — both go through the
- * same `CardDefinition::trait_value` lookup, so client and server
- * agree on cost / speed numbers by construction.
- *
- * Used by client A* (`pixijs/src/game/world/pathfind.ts`) to
- * resolve per-tile `cost` and per-soul `speed` for the step-time
- * calculation, mirroring the server validator in
- * `movement::move_soul_path`.
- * @param {number} packed_def
- * @param {string} name
- * @returns {number | undefined}
- */
-export function traitValue(packed_def, name) {
-    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.traitValue(packed_def, ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return ret[0] === Number.MAX_SAFE_INTEGER ? undefined : ret[0];
-}
-
-/**
  * @param {number} v
  * @returns {any}
  */
@@ -574,11 +728,19 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
+        __wbg___wbindgen_is_string_dde0fd9020db4434: function(arg0) {
+            const ret = typeof(arg0) === 'string';
+            return ret;
+        },
         __wbg___wbindgen_throw_9c31b086c2b26051: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
         __wbg_new_02d162bc6cf02f60: function() {
             const ret = new Object();
+            return ret;
+        },
+        __wbg_new_070df68d66325372: function() {
+            const ret = new Map();
             return ret;
         },
         __wbg_new_310879b66b6e95e1: function() {
@@ -590,6 +752,10 @@ function __wbg_get_imports() {
         },
         __wbg_set_78ea6a19f4818587: function(arg0, arg1, arg2) {
             arg0[arg1 >>> 0] = arg2;
+        },
+        __wbg_set_facb7a5914e0fa39: function(arg0, arg1, arg2) {
+            const ret = arg0.set(arg1, arg2);
+            return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
@@ -625,6 +791,11 @@ function __wbg_get_imports() {
 function getArrayU16FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
 let cachedDataViewMemory0 = null;

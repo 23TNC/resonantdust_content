@@ -10,9 +10,9 @@
 
   "types": {
     "requisite":      { "id": 0,  "visibility": "public",  "shape": "rect", "_comment": "Items / resources — logs, axe, food. Core trade goods." },
-    "blueprint":      { "id": 1,  "visibility": "public",  "shape": "rect", "_comment": "Build plans — one card per entry in content/blueprints/data/. SoulPrivate.blueprints_0 stores the per-soul discovery bitfield; the wrench panel renders one card per known blueprint." },
+    "blueprint":      { "id": 1,  "visibility": "public",  "shape": "rect", "_comment": "Soul-scoped build plans — one card per entry in content/blueprints/data/. SoulPrivate.blueprints_0 stores the per-soul discovery bitfield; the wrench panel renders one card per known blueprint." },
     "revery":         { "id": 2,  "visibility": "public",  "shape": "rect", "_comment": "Memories — shared in-fiction via talk actions." },
-    "_reserved_3":    { "id": 3,  "visibility": "public",  "shape": "rect", "_comment": "Reserved for a future tradeable category." },
+    "player_blueprint": { "id": 3, "visibility": "public", "shape": "rect", "_comment": "Player-scoped build plans — one card per entry in content/player_blueprints/data/. PlayerProfile.blueprints_0 stores the per-player discovery bitfield; the dna panel renders one card per known player_blueprint. Distinct from `blueprint` so def_ids don't collide and the registries can be enumerated independently." },
     "discipline":     { "id": 4,  "visibility": "private", "shape": "rect", "_comment": "Player actions / verbs — soul-bound." },
     "faculty":        { "id": 5,  "visibility": "private", "shape": "rect", "_comment": "Action modifiers — soul-bound." },
     "soul":           { "id": 6,  "visibility": "private", "shape": "rect", "_comment": "Player identity." },

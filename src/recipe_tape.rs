@@ -275,6 +275,7 @@ pub fn parse_recipe(id: &str, value: &Value) -> Result<Recipe, String> {
       .map_err(|e| format!("recipe {id:?}: output[{i}] {s:?}: {e}"))?;
     output.push(stmt);
   }
+  check_slot_contiguity(id, &input, &output, &iterators)?;
   let anchors = classify_anchors(&input, &output, &iterators);
   let (root_slot_hold, root_position_hold) =
     compute_locks(&input, &mut iterators, &anchors);
@@ -287,6 +288,73 @@ pub fn parse_recipe(id: &str, value: &Value) -> Result<Recipe, String> {
     root_slot_hold,
     root_position_hold,
   })
+}
+
+/// Reject recipes whose `slot.X.N` references leave a gap below `N`.
+/// Stacks are contiguous: you can't bind a card at offset 1 without
+/// also referencing offset 0 (the card directly on the root / parent).
+/// A gap means the matcher's chain walk would require a card the
+/// recipe never names — almost always an authoring slip (typo, copy-
+/// paste from a deeper-stack recipe, or forgetting that the loose
+/// root itself is `slot.X.0`).
+///
+/// Walks every `Seg::Slot` in the statement bodies AND in iterator
+/// parent paths, groups by iterator id, and confirms the offset set
+/// is exactly `0..=max`. Reports the missing offsets in the error.
+fn check_slot_contiguity(
+  id: &str,
+  input: &[Stmt],
+  output: &[Stmt],
+  iterators: &[Iterator],
+) -> Result<(), String> {
+  let mut offsets_per_iter: Vec<std::collections::BTreeSet<u32>> =
+    vec![std::collections::BTreeSet::new(); iterators.len()];
+
+  let mut collect = |segments: &[Seg]| {
+    for seg in segments {
+      if let Seg::Slot { iterator_id, offset } = seg {
+        let idx = *iterator_id as usize;
+        if idx < offsets_per_iter.len() {
+          offsets_per_iter[idx].insert(*offset);
+        }
+      }
+    }
+  };
+
+  for stmt in input.iter().chain(output.iter()) {
+    collect(&stmt.segments);
+  }
+  for it in iterators {
+    collect(&it.parent);
+  }
+
+  // Only enforce on top-level iterators (`parent.is_empty()`).
+  // Nested iterators come from re-references inside `when.…` /
+  // `…owner.slot.…` paths and don't follow chain-contiguity —
+  // they alias existing bindings or address sub-chains whose
+  // numbering is independent.
+  for (idx, offsets) in offsets_per_iter.iter().enumerate() {
+    if offsets.is_empty() {
+      continue;
+    }
+    let it = &iterators[idx];
+    if !it.parent.is_empty() {
+      continue;
+    }
+    let max = *offsets.iter().next_back().unwrap();
+    let missing: Vec<u32> = (0..=max).filter(|n| !offsets.contains(n)).collect();
+    if !missing.is_empty() {
+      let referenced: Vec<u32> = offsets.iter().copied().collect();
+      return Err(format!(
+        "recipe {id:?}: slot references in branch {} have gaps — \
+         references offsets {referenced:?} but missing {missing:?}. \
+         Stacks are contiguous from offset 0; you can't reference slot.{}.{} \
+         without also naming slot.{}.0..slot.{}.{}.",
+        it.branch, it.branch, max, it.branch, it.branch, max - 1,
+      ));
+    }
+  }
+  Ok(())
 }
 
 /// Aggregate per-statement prefix tokens into per-iterator and root
@@ -353,7 +421,15 @@ pub fn parse_file(filename: &str, content: &str) -> Result<Vec<Recipe>, String> 
 }
 
 fn parse_one(s: &str, iterators: &mut Vec<Iterator>) -> Result<Stmt, String> {
-  let raw = parse_statement(s)?;
+  // Run the CamelCase alias substitution pass before the structural
+  // parser sees the string. Aliases let authors write
+  // `Top.aspect.faction.set: FactionChorus` instead of
+  // `slot.1.0.aspect.faction.set: 1`; the substitution is a verbatim
+  // string swap, so the parser downstream sees the expanded form.
+  // An unknown CamelCase token errors here (typo gate).
+  let substituted = crate::recipe_aliases::apply_aliases(s)
+    .map_err(|e| format!("statement {:?}: {e}", s))?;
+  let raw = parse_statement(&substituted)?;
   // Detect a leading hold-policy prefix and strip it from the path
   // before slot resolution. Recognized prefixes map to (slot_hold,
   // position_hold). Default (no prefix) is `claim`.
@@ -528,6 +604,65 @@ mod tests {
 
   fn parse(json: &str) -> Vec<Recipe> {
     parse_file("test.json", json).expect("parse")
+  }
+
+  fn try_parse(json: &str) -> Result<Vec<Recipe>, String> {
+    parse_file("test.json", json)
+  }
+
+  #[test]
+  fn rejects_slot_gap_skipping_offset_zero() {
+    // `slot.1.1` without `slot.1.0` — the canonical bug the check
+    // exists to catch (a recipe targeting offset 1 when the loose
+    // root itself is offset 0). Matcher would never bind, recipe
+    // would silently never fire.
+    let json = r#"{
+      "bad": {
+        "input": [ "slot.1.1.def_id: corpse" ],
+        "output": [ "slot.1.1.destroy" ]
+      }
+    }"#;
+    let err = try_parse(json).unwrap_err();
+    assert!(
+      err.contains("branch 1") && err.contains("missing [0]"),
+      "expected gap report mentioning branch 1 and missing [0]; got: {err}"
+    );
+  }
+
+  #[test]
+  fn rejects_slot_gap_skipping_middle_offset() {
+    // `slot.1.0` + `slot.1.2` without `slot.1.1` — middle-of-range gap.
+    let json = r#"{
+      "bad": {
+        "input": [
+          "slot.1.0.def_id: A",
+          "slot.1.2.def_id: C"
+        ],
+        "output": []
+      }
+    }"#;
+    let err = try_parse(json).unwrap_err();
+    assert!(
+      err.contains("missing [1]"),
+      "expected gap report listing missing [1]; got: {err}"
+    );
+  }
+
+  #[test]
+  fn accepts_contiguous_slot_range() {
+    // Sanity check: `slot.1.0..slot.1.2` contiguous parses fine.
+    // Exactly the shape `triple_corpus` uses.
+    let json = r#"{
+      "ok": {
+        "input": [
+          "slot.1.0.def_id: A",
+          "slot.1.1.def_id: B",
+          "slot.1.2.def_id: C"
+        ],
+        "output": []
+      }
+    }"#;
+    assert!(try_parse(json).is_ok());
   }
 
   #[test]

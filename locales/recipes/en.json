@@ -59,5 +59,8 @@
   },
   "stick": {
     "label": "stick"
+  },
+  "chorus_attune": {
+    "label": "chorus_attune"
   }
 }

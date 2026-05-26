@@ -38,7 +38,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-use crate::blueprint_core::{BlueprintId, find_blueprint};
+use crate::blueprint_core::{find_blueprint, BlueprintId, BlueprintScope};
 use crate::definition_core::find_packed_by_key;
 use crate::embedded_data::STARTER_PACKS_FILES;
 
@@ -234,7 +234,7 @@ fn build_starter_packs() -> Result<StarterPackRegistry, String> {
                   filename, soul
                 )
               })?;
-              let bp = find_blueprint(key)
+              let bp = find_blueprint(BlueprintScope::Soul, key)
                 .map_err(|e| {
                   format!("{}: soul {:?}: blueprint {:?}: {}", filename, soul, key, e)
                 })?

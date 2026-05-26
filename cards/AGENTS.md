@@ -27,9 +27,11 @@ are NOT in this tree** — they live under
 
 ## File format (cards/data/**/*.json)
 
-Each file is a nested object: `card_type → card_key → spec`. (The
-former `category` middle level was retired — see
-[docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md](../../docs/CATEGORY_RETIRE_AND_TILE_EXPAND.md).)
+Each file is a nested object: `card_type → card_key → spec`. The former
+`category` middle level was retired — `packed_definition` is now
+`[card_type:u4 | def_id:u12]`. The `categories` block in `types.json`
+is tombstoned; the `card_type` key tree under `data/` and under
+`cards/id.json` is flat (no category level).
 
 ```json
 {
@@ -55,7 +57,10 @@ the registry; a typo just won't produce a decodable card.
 | `style` | yes | `[string, string, string]` — three CSS hex colors (`#RRGGBB`, lowercase or uppercase, exactly 6 hex digits). Validated at registry build; invalid hex produces a stored registry error. Used by the renderer; the server doesn't otherwise interpret them. |
 | `aspects` | no | Map `aspect_name → i32 value`. Every name must be declared in [`aspects.json`](aspects.json) — unknown aspects are a hard build error. Default `{}`. Static — every card row carrying this def sees the same numbers. |
 | `traits` | no | Map `trait_name → number`. Every name must be declared in [`traits.json`](traits.json) — unknown traits are a hard build error. Values are parsed as `f64` and stored as `f32` (so `1`, `1.0`, and `1.2` all round-trip cleanly). Default `{}`. |
-| `stock` | no | Array of row-mutable aspect slots — same aspect namespace, but values live on the row (tile bits) instead of the def. Each entry `{ "aspect": <name>, "max": 1..=3, "default": 0..=max }`. Cap of 2 slots per def. Tile-only in v1. See [Stock slots](#stock-slots) below and [docs/TILE_ASPECTS.md](../../docs/TILE_ASPECTS.md). |
+| `stock` | no | Array of row-mutable aspect slots — same aspect namespace, but values live on the row (tile bits) instead of the def. Each entry `{ "aspect": <name>, "max": 1..=3, "default": 0..=max, "mode"?: "count" \| "index" }`. Cap of 2 slots per def. Tile-only in v1. See [Stock slots](#stock-slots) below. |
+| `object` | no | Foreground card art. `{ "aspect": <aspect-name>, "index"?: <n> }` — the renderer pulls a sprite from `pixijs/public/textures/cards/objects/<size>_<aspect>_pack/`. Without `index`, a deterministic per-row seed picks a variant (hash of `card_id`); with `index: N`, the `_N.png` variant is pinned. The aspect must be a declared render-only aspect in [`aspects.json`](aspects.json) (`{ size, anchor }` metadata). Replaces the retired `sprite` field. |
+| `texture` | no | Card-body texture (PNG fill instead of `style[0]`). `{ "name": <texture-name> }` — the renderer pulls from `pixijs/public/textures/cards/textures/<size>_<name>/`. Same asset pipeline as `object`. |
+| `lifecycle` | no | Defines a time-windowed transformation. `{ "recipe": <recipe-key>, "duration_ms": <u32>, "failure"?: <recipe-key> }`. At creation, cards with a `lifecycle:` block get `FLAG_LIFECYCLE_PENDING` stamped via def-flag inheritance (`magnetic` at bit 2 in [flags.json](flags.json) pending the rename). The client fires the success recipe via `propose_action` once inventory satisfies the slots, or the failure recipe at timer expiry. See [docs/LIFECYCLE_REWRITE.md](../../../docs/LIFECYCLE_REWRITE.md). |
 
 The spec object must be present even if empty (just `{}`), but
 `aspects` / `traits` / `stock` can be omitted entirely — most cards
@@ -105,6 +110,7 @@ Per-slot fields:
 | `aspect` | Name from [`aspects.json`](aspects.json). Unknown → hard build error. |
 | `max` | Cap on the row value. `1..=3` (u2 storage). A def using a slot as a boolean sets `max: 1`. |
 | `default` | Initial value worldgen / spawn paths seed the slot with. `0..=max`. |
+| `mode` | Optional. `"count"` (default) renders `N` copies of the aspect's sprite at this slot. `"index"` picks a single sprite at `_<N>.png` from the pack, so the visible variant cycles as the stock value mutates (e.g. `_3 → _2 → _1 → (none)`). Falls through `ObjectTextureManager.get(..., index)` — the same resolver as the `object:` field. |
 
 **Order matters.** Array index 0 maps to the per-tile `stock0` bits,
 index 1 maps to `stock1`. Reordering the array is a data-breaking
@@ -116,12 +122,12 @@ matcher prefers the row's stock value when evaluating
 `{"aspect": <name>, "min": N}` against a tile that declares this
 aspect in `stock`; the def's static `aspects` value falls back for
 non-tile contexts (texture lookups, defs without a matching stock
-slot). See [docs/TILE_ASPECTS.md] §"Stock vs static-aspect priority"
-for the precedence rules.
+slot).
 
-Recipes consume stock via the `consume.hex.aspect.<name>: N` field
-— see [content/recipes/AGENTS.md](../recipes/AGENTS.md) for the
-recipe-side shape.
+Recipes consume stock via output ops `slot.0.0.aspect.<name>.sub: N`
+(under the recipe-tape model) — see
+[content/recipes/AGENTS.md](../recipes/AGENTS.md) for the recipe-side
+shape.
 
 ## cards/types.json
 
@@ -138,9 +144,7 @@ recipe-side shape.
     "tile":      { "id": 7, "visibility": "private", "shape": "hex"  },
     ...
   },
-  "categories": {
-    "default": { "id": 0 }
-  }
+  "_categories_tombstone": "retired — packed_definition is now [type:u4 | def_id:u12]"
 }
 ```
 
@@ -150,16 +154,17 @@ Per-type fields:
 | --- | --- |
 | `id` | u4, `[0, 15]`. Goes into the high nibble of `packed_definition`. Append-only — never recycle an id. |
 | `visibility` | `"public"` (id `[0, 3]`) or `"private"` (id `[4, 15]`). Enforced by SpacetimeDB subscription filters: public rows are visible cross-player for trade subscriptions; private rows are owner-only. The numeric cutoff lives in `_rules.public_max_id` and is materialised on the wire as `packed_definition < 0x4000`. |
-| `shape` | `"rect"` or `"hex"`. Drives [`is_hex_type`](../src/definition_core.rs); rect types stack into card chains, hex types are anchors that rect roots attach to via `stacked_state == OnHex`. Missing field defaults to rect on the read path, but always declare it explicitly. |
+| `shape` | `"rect"` or `"hex"`. Drives [`is_hex_type`](../src/definition_core.rs); rect types stack as chain roots, hex types are tile-shaped (occupy a hex). Both flavours are first-class cards under the unified card model — there's no separate "hex tile anchor" state. Missing field defaults to rect on the read path, but always declare it explicitly. |
 | `_comment` | Optional — describes what the type is for. |
 
 `_reserved_<n>` entries hold a numeric id slot for a future type
 without registering it as real. Bucket keys like `"_reserved_1"` will
 never resolve and the loader skips them.
 
-Categories follow the same pattern — only `"default"` exists today.
-Both types and categories occupy `u4` halves of `packed_definition`,
-so the `0x0F` cap is hard.
+The former `categories` block is tombstoned — `packed_definition`
+collapsed `[type:u4 | category:u4 | def_id:u8]` into
+`[type:u4 | def_id:u12]`, freeing 4 bits for a 16× larger def_id
+namespace.
 
 ## cards/aspects.json
 
@@ -238,25 +243,16 @@ and don't exist server-side anymore).
 
 ```json
 {
-  "soul": {
-    "default": {
-      "human": 1
-    }
-  },
-  "tile": {
-    "default": {
-      "forest_1": 1,
-      "forest_2": 2,
-      "tree":     3,
-      "rock":     4
-    }
-  },
-  ...
+  "soul":      { "human": 1 },
+  "tile":      { "forest_1": 1, "forest_2": 2, "tree": 3, "rock": 4 },
+  "requisite": { "log": 1, "axe": 2 }
 }
 ```
 
-- IDs are u8 (1–255), scoped per `(card_type, category)`. **`0` is
-  reserved as the sentinel "no card."**
+- IDs are **u12** (1–4095), scoped per `card_type`. **`0` is reserved
+  as the sentinel "no card."** Flat per-type — the former
+  `(type, category)` middle level is gone (see "categories tombstoned"
+  above).
 - Generated by [`../gen-ids.py`](../gen-ids.py). Default-mode runs
   reassign IDs on every invocation (fine while wire compatibility
   doesn't matter); `--skip-known` preserves existing ids and only
@@ -282,18 +278,16 @@ and don't exist server-side anymore).
 
 Card display labels live in
 [`../locales/cards/<lang>.json`](../locales/), path-keyed by
-`<card_type>.<category>.<key>` matching the `cards/id.json` nesting:
+`<card_type>.<key>` matching the `cards/id.json` nesting:
 
 ```json
 {
   "requisite": {
-    "default": {
-      "log": {
-        "label": "Log",
-        "description": { "simple": "Just a wooden log." }
-      },
-      "axe": { "label": "Axe" }
-    }
+    "log": {
+      "label": "Log",
+      "description": { "simple": "Just a wooden log." }
+    },
+    "axe": { "label": "Axe" }
   }
 }
 ```
@@ -301,11 +295,9 @@ Card display labels live in
 Each leaf object has a required `label` and optional nested fields like
 `description.simple` / `description.detailed`. Lookups go through
 [`locales_core::label("cards", lang, path)`](../src/locales_core.rs)
-with an English fallback (see
-[`../AGENTS.md`](../AGENTS.md#display-labels-and-the-locale-lookup-chain)).
-The wasm API exposes a one-shot `cardLabel(packed, lang)` that builds
-the path via [`card_locale_path`](../src/definition_core.rs) and
-dispatches.
+with an English fallback. The wasm API exposes a one-shot
+`cardLabel(packed, lang)` that builds the path via
+[`card_locale_path`](../src/definition_core.rs) and dispatches.
 
 Cards without a locale entry render as their bare `key` — fine for
 prototyping, sloppy for shipping. `bin/content check` is the place to
@@ -343,10 +335,9 @@ enforce coverage.
   a card "doesn't decode," check that the top-level key is the
   singular form declared in `types.json`, and that `cards/id.json`
   picked it up.
-- **Definition_id overflow**: a single `(type, category)` bucket can't
-  hold more than 255 cards (registry build errors out). If you ever
-  approach that, split into a new category — the bit layout supports
-  16 categories per type.
+- **Definition_id overflow**: a single `card_type` bucket can't hold
+  more than 4095 cards (u12 def_id). If you ever approach that, the
+  bit layout has no headroom — `packed_definition` would need to widen.
 - **Aspect / trait typos**: hard build errors. The error message names
   the file, card key, and unknown name — fix `aspects.json` /
   `traits.json` or the typo.
@@ -361,17 +352,18 @@ enforce coverage.
 
 ## Adding a new card
 
-1. Pick the right `(card_type, category)` bucket in an existing file
-   under [`data/`](data/), or add a new file anywhere under it.
-2. Add the spec object — at minimum a `style`, plus optional `aspects`
-   / `traits`.
+1. Pick the right `card_type` bucket in an existing file under
+   [`data/`](data/), or add a new file anywhere under it.
+2. Add the spec object — at minimum a `style`, plus optional
+   `aspects` / `traits` / `stock` / `object` / `texture` /
+   `lifecycle`.
 3. Make sure every aspect / trait name in the spec already exists in
    `aspects.json` / `traits.json`. Add it there first if not.
 4. Run `bin/content check` to assign a stable `definition_id` in
    `cards/id.json` and verify the registry builds.
 5. Add a label to [`../locales/cards/en.json`](../locales/cards/en.json)
-   under the matching `<type>.<category>.<key>` path. Without it the
-   card renders as its bare key.
+   under the matching `<type>.<key>` path. Without it the card renders
+   as its bare key.
 
 No `CARDS_FILES` constant to update — [`build.rs`](../build.rs)
 auto-discovers files in `data/**/*.json`.

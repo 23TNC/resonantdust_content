@@ -29,12 +29,15 @@
 // is purely directional — `direction = 0/1/2` selects which side of
 // the root (top / bottom / hex) the child chains onto. The card's
 // `card_type` only drives shape rendering, not structural logic. No
-// special "hex-anchored" state exists anymore (it was `OnHex = 3` in
-// the legacy model and is retired in the unified model).
+// special "hex-anchored" state exists anymore — value 3 (formerly
+// `OnHex`) was reserved when that model retired and has since been
+// repurposed as `Deferred` for state-3 deferred placement (see the
+// variant doc on `StackedState::Deferred`).
 //
 // The "server is forcing this position" signal moved out of micro_zone
 // (it used to live in bit 2 alongside position/state) and now lives in
-// `flags` (`force_position` at bit 11) — see `cards/flags.json`.
+// `flags` as the `pos_need` (required) / `pos_want` (advisory) bit
+// pair — see `cards/flags.json`.
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,21 +61,39 @@ pub enum StackedState {
     /// `micro_zone.position`; chain branch (top / bottom / hex) comes
     /// from `micro_zone.direction`.
     OnRoot = 2,
-    // Value 3 is reserved — was `OnHex` in the legacy hex-anchored
-    // model; retired with the unified card model.
+    /// **Deferred placement, anchored to host.** `micro_location` is
+    /// the host card_id (or 0 if no host); `micro_zone` upper 6 bits
+    /// carry a fallback `(q, r)` in the legacy layout. Resolution
+    /// runs client-side at mirror time (`CardManager.appendAtChainLeaf`):
+    /// walk host's chain to its root, pick the chain's growth
+    /// direction, append new leaf in that direction; on any tier
+    /// rejection (host gone, type-incompatible, drop-locked) fall
+    /// through to (q, r) loose → owner inventory → free (q, r) in
+    /// macroZone → worst-case loose at (q, r).
+    ///
+    /// Server-side: the follower index in `cards::state_3_followers`
+    /// keeps every deferred row's `(surface, macro_zone)` in lockstep
+    /// with its host so subscription gaps don't strand cards on the
+    /// wrong zone. Host destruction clears `micro_location = 0`;
+    /// client cascade then falls through to the (q, r) tier.
+    ///
+    /// Pre-unified-card-model this value was `OnHex` (hex cards were
+    /// their own state); retired and reserved, freeing the value for
+    /// this repurposing. Recipe outputs like `stack.N.create: <key>`
+    /// emit this state so the placement doesn't go stale between
+    /// propose and commit.
+    Deferred = 3,
 }
 
 impl StackedState {
-    /// Decode a 2-bit state value. Value 3 panics — it was the legacy
-    /// `OnHex` variant; under the unified card model no card row
-    /// should carry that state. Encountering one indicates either
-    /// stale data from before the migration or a bit-packing bug.
+    /// Decode a 2-bit state value. All four values are now defined —
+    /// `Deferred` repurposes the previously-reserved value 3.
     pub fn from_u2(v: u8) -> Self {
         match v & 0b11 {
             0 => Self::Free,
             1 => Self::Slot,
             2 => Self::OnRoot,
-            3 => panic!("StackedState::from_u2: value 3 is reserved (legacy OnHex)"),
+            3 => Self::Deferred,
             _ => unreachable!(),
         }
     }
@@ -93,9 +114,35 @@ impl StackedState {
 // - INVENTORY_LAYER (1):           `macro_zone` = the owning soul's
 //                                  `card_id`. The player's hand /
 //                                  bag / inventory grid.
+// - PLAYER_INVENTORY_LAYER (2):    `macro_zone` = the owning
+//                                  `player_id`. Player-scoped
+//                                  inventory shared across that
+//                                  player's souls — for permanent
+//                                  account-level items, the
+//                                  player-wide counterpart of
+//                                  per-soul inventory. Same
+//                                  bucket convention as soul
+//                                  inventory; the only difference
+//                                  is what `macro_zone` IS.
 // - POCKET_DIMENSION_LAYER (32):   `macro_zone` = the anchor card's
 //                                  `card_id`. A private interior
 //                                  carried by an anchor card.
+// - PLAYER_DIMENSION_LAYER (62):   `macro_zone` = packed
+//                                  `(chunkQ:i16, chunkR:i16)` (same
+//                                  encoding as world). Owner_id is
+//                                  the player_id discriminator —
+//                                  multiple players' dimensions
+//                                  coexist at the same macro_zone
+//                                  and are disambiguated by the
+//                                  Zone's / Card's `owner_id`
+//                                  field. A player-wide private
+//                                  world that all of a player's
+//                                  souls can visit. Lookups MUST go
+//                                  through `latest_for_owner` /
+//                                  owner-aware tile reads — the
+//                                  unkeyed `latest_for` would
+//                                  return whichever player's row
+//                                  has the highest valid_at_time.
 // - MINI_ZONE_LAYER (63):          `macro_zone` = the anchor card's
 //                                  `card_id`. A radius-3 hex disk
 //                                  overlaying the world wherever
@@ -113,7 +160,9 @@ impl StackedState {
 // existing rect-stack machinery), and world-only queries continue
 // to skip mini_zone contents.
 pub const INVENTORY_LAYER: u8 = 1;
+pub const PLAYER_INVENTORY_LAYER: u8 = 2;
 pub const POCKET_DIMENSION_LAYER: u8 = 32;
+pub const PLAYER_DIMENSION_LAYER: u8 = 62;
 pub const MINI_ZONE_LAYER: u8 = 63;
 pub const WORLD_LAYER: u8 = 64;
 
@@ -211,7 +260,7 @@ pub const STACK_DIR_DOWN: u8 = 2;
 ///
 /// The "server is forcing this position" signal moved out of micro_zone
 /// (it used to share bits with state/direction) and lives in `flags`
-/// (`force_position` at bit 11).
+/// as the `pos_need` (required) / `pos_want` (advisory) bit pair.
 ///
 /// **Only valid for `state == OnRoot`.** Free cards use
 /// [`pack_micro_zone`]; Slot cards use [`pack_slot_micro_zone`].
@@ -315,6 +364,51 @@ pub fn pack_zone_definition(card_type: u8) -> u8 {
 
 pub fn unpack_zone_definition(v: u8) -> u8 {
     (v >> 4) & 0xF
+}
+
+// ---- nibble-pair (u8 = [count: u4 | max: u4]) ------------------------
+//
+// Compact pair-of-counts encoding. Used by `PlayerProfile` for
+// `blueprint_info` (current placed blueprint count vs cap) and
+// `soul_info` (current soul-card count vs cap). Both nibbles are
+// in 0..=15; values above 15 saturate when packing.
+//
+// Layout: `count` in the high nibble, `max` in the low nibble. The
+// "current" count goes on top so a `(0, 5)` initial state reads as
+// `0x05` rather than `0x50` — easier to eyeball in a hex dump.
+
+/// Pack `(count, max)` into a `u8`. Values above 15 saturate to 15.
+pub fn pack_nibbles(count: u8, max: u8) -> u8 {
+    let c = count.min(0xF);
+    let m = max.min(0xF);
+    (c << 4) | m
+}
+
+/// Inverse of [`pack_nibbles`]. Returns `(count, max)`.
+pub fn unpack_nibbles(v: u8) -> (u8, u8) {
+    ((v >> 4) & 0xF, v & 0xF)
+}
+
+/// Read just the `count` (high) nibble.
+pub fn nibble_count(v: u8) -> u8 {
+    (v >> 4) & 0xF
+}
+
+/// Read just the `max` (low) nibble.
+pub fn nibble_max(v: u8) -> u8 {
+    v & 0xF
+}
+
+/// Replace the `count` nibble, preserving the `max` nibble.
+/// Values above 15 saturate.
+pub fn with_nibble_count(v: u8, count: u8) -> u8 {
+    pack_nibbles(count, nibble_max(v))
+}
+
+/// Replace the `max` nibble, preserving the `count` nibble.
+/// Values above 15 saturate.
+pub fn with_nibble_max(v: u8, max: u8) -> u8 {
+    pack_nibbles(nibble_count(v), max)
 }
 
 // ---- recipe (u16 = u3 type | u3 category | u10 id) -------------------
@@ -526,9 +620,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "reserved (legacy OnHex)")]
-    fn legacy_onhex_value_panics_in_from_u2() {
-        let _ = StackedState::from_u2(3);
+    fn from_u2_decodes_deferred() {
+        // Value 3 is no longer reserved — it decodes to `Deferred`
+        // (the repurposed slot, formerly the panicking `OnHex`).
+        assert_eq!(StackedState::from_u2(3), StackedState::Deferred);
     }
 
     #[test]

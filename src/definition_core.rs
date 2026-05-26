@@ -65,6 +65,63 @@ pub type AspectId = u8;
 /// 1-indexed.
 pub const ASPECT_NONE: AspectId = 0;
 
+/// Sprite render-time random scale envelope. `0 ≤ min ≤ max`, both
+/// finite. `{ min: 1, max: 1 }` (the default when an aspect omits the
+/// `scale` block) means "render at native size, no random variation."
+/// Stored on `Aspect` for aspects that carry render metadata.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderScale {
+  pub min: f32,
+  pub max: f32,
+}
+
+/// Sprite anchor — fractional pivot point used when placing the
+/// texture. `(0, 0)` is top-left, `(1, 1)` bottom-right; `(0.5, 0.5)`
+/// is centred. Different objects pivot differently: a tree wants its
+/// trunk near `(0.5, 0.75)` so the canopy rises *above* the world-hex
+/// it sits on; a small ground item like a flower wants `(0.5, 0.5)` so
+/// it sits centred. Stored on `Aspect` so the same anchor applies to
+/// every card that resolves through `object: { aspect: <name> }`.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderAnchor {
+  pub x: f32,
+  pub y: f32,
+}
+
+/// Default anchor when an aspect's JSON omits the `anchor` block —
+/// geometric centre. Aspects whose sprite needs an off-centre pivot
+/// (trees pivoting at the trunk, etc.) declare an explicit `anchor`
+/// per entry.
+pub const DEFAULT_RENDER_ANCHOR: RenderAnchor = RenderAnchor { x: 0.5, y: 0.5 };
+
+/// Default scale when an aspect's JSON omits the `scale` block.
+/// Native size, no variation.
+pub const DEFAULT_RENDER_SCALE: RenderScale = RenderScale { min: 1.0, max: 1.0 };
+
+/// Display category for an `Aspect`. Reflects which top-level
+/// section of `aspects.json` the entry was parsed under. All three
+/// categories share the same registry, storage, and recipe-matcher
+/// — the split is editorial + display.
+///
+/// - `Aspect` — WHAT a card has. Primary recipe input. Displayed
+///   in the details panel's minimum/collapsed state.
+/// - `Feature` — HOW a card acts. Behavioural tags (faction,
+///   inventory, fleeting, level, crafting, speed). Recipe-matchable
+///   too. Displayed in the expanded details, smaller pip row above
+///   the description.
+/// - `Trait` — WHAT a card is. Descriptive properties consumed by
+///   simulation code (movement cost, climate envelopes, placement
+///   metadata). Not displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AspectCategory {
+  Aspect,
+  Feature,
+  Trait,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Aspect {
@@ -73,31 +130,30 @@ pub struct Aspect {
   pub name: String,
   /// Human-readable description from the JSON.
   pub description: String,
-  /// Unicode icon representing this aspect, e.g. `"⚔"`.
+  /// Unicode icon representing this aspect. Defaults to `""` when
+  /// the entry (and its ancestors) declare none — typical for
+  /// `trait`-category entries that never render.
   pub icon: String,
-  /// Display color packed as `0xRRGGBB`. Parsed from a `#RRGGBB`
-  /// string in `aspects.json`. Sub-aspects inherit their parent's
-  /// color when their JSON entry omits the field, same pattern as
-  /// `icon` — lets families render with a single color across the
-  /// tree (e.g. all corpus polarities share the body-red). Renderers
-  /// use this directly: `gfx.fill({ color: aspect.color })`.
+  /// Display color packed as `0xRRGGBB`. Defaults to `0x888888`
+  /// (neutral grey) when the entry and its ancestors declare none.
   pub color: u32,
-  /// Top-level family name — the name of the aspect at the root of
-  /// this aspect's parent chain. Top-level aspects have `group ==
-  /// name`; nested sub-aspects carry their root ancestor's name
-  /// (e.g. `berries.group == "food"` when berries is declared under
-  /// fruit which is declared under food). Used for UI grouping
-  /// (color coding pips, sectioning details panels) — categorical
-  /// JSON-level grouping (`resources` / `elements` / ...) was
-  /// dropped in favour of the implicit family-via-hierarchy.
+  /// Top-level family name within the aspect's section — the name
+  /// of the aspect at the root of this aspect's parent chain.
+  /// Top-level entries have `group == name`; nested sub-aspects
+  /// carry their root ancestor's name (e.g. `pine.group == "wood"`).
+  /// No cross-section parents — `group` always sits inside the
+  /// aspect's own `category` section.
   pub group: String,
   /// Parent aspect id when this aspect is nested under another in
-  /// `aspects.json` (e.g. `apples` declared inside `food`). Forms a
-  /// single-inheritance tree used by the recipe matcher to widen
-  /// `Entity::Aspect` predicates: a recipe asking for `food` matches
-  /// a card carrying any descendant of `food`. `None` for top-level
-  /// aspects within their group.
+  /// `aspects.json`. Forms a single-inheritance tree used by the
+  /// recipe matcher to widen `Entity::Aspect` predicates: a recipe
+  /// asking for `food` matches a card carrying any descendant of
+  /// `food`. `None` for top-level entries within their section.
   pub parent: Option<AspectId>,
+  /// Which top-level section of `aspects.json` declared this entry
+  /// (or its top ancestor — sub-aspects inherit). See
+  /// [`AspectCategory`].
+  pub category: AspectCategory,
 }
 
 struct AspectRegistry {
@@ -180,33 +236,68 @@ fn build_aspects() -> Result<AspectRegistry, String> {
   let mut id_by_name: BTreeMap<String, AspectId> = BTreeMap::new();
   let mut next_id: u32 = 1;
 
-  // Flat top-level — every non-`_` key is a top-level aspect entry.
-  // Categorical grouping (resources / elements / ...) was retired in
-  // favour of letting the aspect hierarchy carry the family info via
-  // `Aspect.group`, which is set to the top-level ancestor's name
-  // (so `berries.group == "food"` when berries is nested under
-  // fruit which is nested under food).
-  for (aspect_name, entry_value) in root {
-    if aspect_name.starts_with('_') {
-      continue;
-    }
-    let entry_obj = entry_value.as_object().ok_or_else(|| {
+  // Three sections — `aspects`, `features`, `traits`. Each section is
+  // itself an object whose top-level keys are top-level entries (which
+  // may carry nested sub-entries). The section name maps 1:1 to an
+  // `AspectCategory` and is inherited by every entry inside it.
+  // Categorical grouping inside a section continues to work via
+  // `Aspect.group` (the top-level ancestor's name within that
+  // section).
+  const SECTIONS: &[(&str, AspectCategory)] = &[
+    ("aspects", AspectCategory::Aspect),
+    ("features", AspectCategory::Feature),
+    ("traits", AspectCategory::Trait),
+  ];
+
+  for (section_name, category) in SECTIONS {
+    let section_value = root.get(*section_name).ok_or_else(|| {
+      format!("aspects.json: missing required section {:?}", section_name)
+    })?;
+    let section_obj = section_value.as_object().ok_or_else(|| {
       format!(
-        "aspects.json: aspect {:?} not an object (expected {{\"icon\": ..., \"description\": ...}})",
-        aspect_name
+        "aspects.json: section {:?} not an object",
+        section_name
       )
     })?;
-    register_aspect_recursive(
-      aspect_name,
-      entry_obj,
-      aspect_name,
-      None,
-      None,
-      None,
-      &mut by_id,
-      &mut id_by_name,
-      &mut next_id,
-    )?;
+    for (entry_name, entry_value) in section_obj {
+      if entry_name.starts_with('_') {
+        continue;
+      }
+      let entry_obj = entry_value.as_object().ok_or_else(|| {
+        format!(
+          "aspects.json: {}.{:?} not an object",
+          section_name, entry_name
+        )
+      })?;
+      register_aspect_recursive(
+        entry_name,
+        entry_obj,
+        entry_name,
+        None,
+        None,
+        None,
+        None,
+        *category,
+        &mut by_id,
+        &mut id_by_name,
+        &mut next_id,
+      )?;
+    }
+  }
+
+  // Reject unknown top-level keys (caught typos like "feature" instead
+  // of "features"). Sections + the `_comment` documentation are the
+  // only legal top-level entries.
+  for key in root.keys() {
+    if key.starts_with('_') {
+      continue;
+    }
+    if !SECTIONS.iter().any(|(s, _)| s == key) {
+      return Err(format!(
+        "aspects.json: unexpected top-level key {:?} (expected one of `aspects`, `features`, `traits`)",
+        key
+      ));
+    }
   }
 
   Ok(AspectRegistry { by_id, id_by_name })
@@ -222,12 +313,22 @@ fn build_aspects() -> Result<AspectRegistry, String> {
 /// instead of silently dropped. The recursion is top-down so a
 /// child's parent id is always already registered when we reach it.
 ///
-/// `inherited_icon` / `inherited_color` are the values to fall back
-/// on when this aspect omits its own `icon` / `color` — `None` at
-/// the top level, and the parent aspect's values when recursing into
-/// children. Lets sub-aspects collapse onto their parent's
-/// visuals so callers can render whole families with a single glyph
-/// and color while the JSON stays terse.
+/// `inherited_icon` / `inherited_color` / `inherited_description` are
+/// the values to fall back on when this aspect omits its own
+/// `icon` / `color` / `description` — `None` at the top level, and
+/// the nearest ancestor's resolved values when recursing into
+/// children. Lets sub-aspects collapse onto their parent's visuals
+/// and copy so callers can render whole families with a single glyph,
+/// color, and blurb while the JSON stays terse. For description an
+/// empty string is treated the same as "missing" (inherit if a
+/// non-empty ancestor exists, else stay empty — `anima` / `sollertia`
+/// are intentionally blank roots).
+/// Default color when an entry (and its ancestors) declare none.
+/// Neutral grey — picked as a "this entry doesn't care about
+/// display" signal that still renders without crashing.
+const DEFAULT_ASPECT_COLOR: u32 = 0x88_88_88;
+
+#[allow(clippy::too_many_arguments)]
 fn register_aspect_recursive(
   name: &str,
   entry: &serde_json::Map<String, Value>,
@@ -235,6 +336,8 @@ fn register_aspect_recursive(
   parent: Option<AspectId>,
   inherited_icon: Option<&str>,
   inherited_color: Option<u32>,
+  inherited_description: Option<&str>,
+  category: AspectCategory,
   by_id: &mut Vec<Aspect>,
   id_by_name: &mut BTreeMap<String, AspectId>,
   next_id: &mut u32,
@@ -248,30 +351,29 @@ fn register_aspect_recursive(
   let id = *next_id as AspectId;
   *next_id += 1;
 
-  let description = entry
-    .get("description")
-    .and_then(Value::as_str)
-    .ok_or_else(|| {
+  let own_description: Option<&str> = match entry.get("description") {
+    None => None,
+    Some(v) => Some(v.as_str().ok_or_else(|| {
       format!(
-        "aspects.json: aspect {}/{} missing or non-string 'description'",
+        "aspects.json: aspect {}/{} 'description' is not a string",
         group, name
       )
-    })?
-    .to_string();
-
-  let icon = match entry.get("icon").and_then(Value::as_str) {
-    Some(s) => s.to_string(),
-    None => match inherited_icon {
-      Some(s) => s.to_string(),
-      None => {
-        return Err(format!(
-          "aspects.json: aspect {}/{} missing 'icon' and has no parent to inherit from",
-          group, name
-        ));
-      }
-    },
+    })?),
+  };
+  let description = match own_description {
+    Some(s) if !s.is_empty() => s.to_string(),
+    _ => inherited_description.unwrap_or("").to_string(),
   };
 
+  // `icon` is optional throughout — defaults to `""` if no
+  // ancestor declares one. Most `trait`-category entries never
+  // render, so they leave it off.
+  let icon = match entry.get("icon").and_then(Value::as_str) {
+    Some(s) => s.to_string(),
+    None => inherited_icon.unwrap_or("").to_string(),
+  };
+
+  // `color` is optional throughout — defaults to neutral grey.
   let color = match entry.get("color") {
     Some(v) => {
       let s = v.as_str().ok_or_else(|| {
@@ -287,15 +389,7 @@ fn register_aspect_recursive(
         )
       })?
     }
-    None => match inherited_color {
-      Some(c) => c,
-      None => {
-        return Err(format!(
-          "aspects.json: aspect {}/{} missing 'color' and has no parent to inherit from",
-          group, name
-        ));
-      }
-    },
+    None => inherited_color.unwrap_or(DEFAULT_ASPECT_COLOR),
   };
 
   if id_by_name.contains_key(name) {
@@ -308,24 +402,25 @@ fn register_aspect_recursive(
   by_id.push(Aspect {
     id,
     name: name.to_string(),
-    description,
+    description: description.clone(),
     icon: icon.clone(),
     color,
     group: group.to_string(),
     parent,
+    category,
   });
   id_by_name.insert(name.to_string(), id);
 
   // Walk object-valued keys as nested sub-aspects. Property keys
-  // (`icon` / `description` / `color`) are scalars; `_`-prefixed
-  // keys are documentation. Anything else with an object value is a
-  // child; a non-object value under an unrecognised key is an
-  // authoring error and rejects.
+  // (`icon` / `description` / `color`) are scalars / inline objects
+  // on this aspect; `_`-prefixed keys are documentation. Anything
+  // else with an object value is a child; a non-object value under
+  // an unrecognised key is an authoring error and rejects.
   for (sub_name, sub_value) in entry {
     if sub_name.starts_with('_') {
       continue;
     }
-    if sub_name == "icon" || sub_name == "description" || sub_name == "color" {
+    if matches!(sub_name.as_str(), "icon" | "description" | "color") {
       continue;
     }
     let sub_obj = sub_value.as_object().ok_or_else(|| {
@@ -341,6 +436,8 @@ fn register_aspect_recursive(
       Some(id),
       Some(&icon),
       Some(color),
+      Some(&description),
+      category,
       by_id,
       id_by_name,
       next_id,
@@ -360,116 +457,30 @@ fn parse_hex_color(s: &str) -> Option<u32> {
   u32::from_str_radix(&s[1..], 16).ok()
 }
 
-// ---------- Traits ----------
-
-pub type TraitId = u8;
-
-/// Sentinel id meaning "no trait" / "unknown trait". Trait IDs are
-/// 1-indexed, matching the aspect convention.
-pub const TRAIT_NONE: TraitId = 0;
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct Trait {
-  pub id: TraitId,
-  /// Programmatic name from the JSON.
-  pub name: String,
-  /// Human-readable description from the JSON.
-  pub description: String,
-  /// Group the trait was declared under, e.g. `"general"`.
-  pub group: String,
-}
-
-struct TraitRegistry {
-  by_id: Vec<Trait>,                       // index by (id - 1)
-  id_by_name: BTreeMap<String, TraitId>,
-}
-
-const TRAITS_JSON: &str = include_str!("../cards/traits.json");
-static TRAITS: OnceLock<Result<TraitRegistry, String>> = OnceLock::new();
-
-fn traits_registry() -> Result<&'static TraitRegistry, String> {
-  TRAITS.get_or_init(build_traits).as_ref().map_err(|e| e.clone())
-}
-
-/// Look up a trait's id by name. Returns `Ok(None)` if the registry built
-/// successfully but no trait with that name is declared, `Err` if the
-/// trait registry failed to build.
-pub fn trait_id(name: &str) -> Result<Option<TraitId>, String> {
-  Ok(traits_registry()?.id_by_name.get(name).copied())
-}
-
-/// Resolve a `TraitId` back to the full `Trait` record. `Ok(None)` for
-/// `TRAIT_NONE` and for ids past the end of the registry; `Err` on
-/// registry-build failure. Named `trait_def` rather than `trait` because
-/// `trait` is a Rust keyword.
-pub fn trait_def(id: TraitId) -> Result<Option<&'static Trait>, String> {
-  if id == TRAIT_NONE {
-    return Ok(None);
-  }
-  Ok(traits_registry()?.by_id.get((id - 1) as usize))
-}
-
-/// All known traits, ordered by id. `Err` on registry-build failure.
-pub fn traits() -> Result<&'static [Trait], String> {
-  Ok(&traits_registry()?.by_id)
-}
-
-fn build_traits() -> Result<TraitRegistry, String> {
-  let root: Value = serde_json::from_str(TRAITS_JSON)
-    .map_err(|e| format!("traits.json: parse failed: {}", e))?;
-  let root = root
-    .as_object()
-    .ok_or_else(|| "traits.json: top-level not an object".to_string())?;
-
-  let mut by_id: Vec<Trait> = Vec::new();
-  let mut id_by_name: BTreeMap<String, TraitId> = BTreeMap::new();
-  let mut next_id: u32 = 1;
-
-  for (group_name, group_value) in root {
-    if group_name.starts_with('_') {
-      continue;
-    }
-    let group_obj = group_value.as_object().ok_or_else(|| {
-      format!("traits.json: group {:?} not an object", group_name)
-    })?;
-
-    for (trait_name, desc_value) in group_obj {
-      if trait_name.starts_with('_') {
-        continue;
-      }
-      if next_id > TraitId::MAX as u32 {
-        return Err(format!(
-          "traits.json: more than {} traits (id overflow)",
-          TraitId::MAX,
-        ));
-      }
-      let id = next_id as TraitId;
-      next_id += 1;
-
-      let description = desc_value
-        .as_str()
-        .ok_or_else(|| {
-          format!(
-            "traits.json: trait {}/{} description not a string",
-            group_name, trait_name
-          )
-        })?
-        .to_string();
-
-      by_id.push(Trait {
-        id,
-        name: trait_name.clone(),
-        description,
-        group: group_name.clone(),
-      });
-      id_by_name.insert(trait_name.clone(), id);
-    }
-  }
-
-  Ok(TraitRegistry { by_id, id_by_name })
-}
-
 // ---------- Cards ----------
+
+/// Reference to a renderable object pack. Used as the
+/// `CardDefinition::object` field — the unified card-art lookup.
+/// `name` must name an entry in `objects.json`; the runtime resolves
+/// this to the `master/<name>/` pack folder. `index` (when set)
+/// picks the file whose basename is `<N>.png` — stable across pack
+/// additions / deletions. Omitting `index` lets the renderer pick
+/// pseudo-randomly from the pack based on the card's row id.
+///
+/// `scale` (when set) overrides the object's own scale envelope at
+/// render time. Same `{min, max}` shape as `objects.json` scale;
+/// per-instance scale is `min + rng * (max - min)`. Use when a card
+/// wants the same sprite pack as some baseline object but rendered
+/// at a different size (e.g. a corpse card reusing the `soul`
+/// pack but drawn smaller / larger). Omit to use the object's
+/// declared scale.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardObjectRef {
+  pub name: String,
+  pub index: Option<u32>,
+  pub scale: Option<RenderScale>,
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -492,27 +503,32 @@ pub struct CardDefinition {
   /// here at indices 3-4; they now live on the top-level [`sprite`]
   /// field. Validated at build time.
   pub style: Vec<String>,
-  /// Optional sprite filename rendered centred on the card body
-  /// (rect cards) or as the foreground overlay (hex cards). Resolved
-  /// at runtime against `public/textures/cards/objects/<filename>`.
-  /// `None` (or missing in JSON) means "no sprite."
-  pub sprite: Option<String>,
-  /// `(aspect_id, value)` pairs. Names are translated to ids at registry
-  /// build time via `aspect_id`; an unknown aspect name in card data is a
-  /// stored registry-build error. Each `aspect_id` appears at most once
-  /// per definition.
-  pub aspects: Vec<(AspectId, i32)>,
-  /// `(trait_id, value)` pairs. Same shape as `aspects` but resolved
-  /// against `traits.json` via `trait_id`. Empty for cards that don't
-  /// declare any traits yet (the JSON requires the field to be present
-  /// as an object, but `{}` is valid).
-  /// `(trait_id, value)` pairs parsed from the card's JSON `"traits"`
-  /// block. Values are `f32` because some traits (notably the tile
-  /// `cost` trait used by movement pathfinding) are naturally
-  /// fractional — `forest_2`'s `1.2` cost wouldn't survive an `i32`
-  /// round-trip. JSON integers parse to whole-number floats (`1` →
-  /// `1.0`) without loss.
-  pub traits: Vec<(TraitId, f32)>,
+  /// Unified card-art reference. Picks a texture by object name from
+  /// the `master/<name>/` folder; `index` (when set) pins `<N>.png`,
+  /// otherwise the runtime hashes `card_id` for a deterministic-per-
+  /// row pick. Replaced the legacy `sprite` field.
+  pub object: Option<CardObjectRef>,
+  /// Optional card-body background texture. Resolves through the
+  /// same `master/<name>/[<faction>/]<N>.png` pipeline as `object`,
+  /// but fills the card body (behind the foreground art) instead of
+  /// acting as the foreground sprite. When `Some`, the renderer
+  /// covers the body shape (rect or hex polygon) with the chosen
+  /// PNG (uniform-scale cover-fit, polygon clip); when `None`, the
+  /// body falls back to `style[0]` solid fill. See
+  /// [docs/CARD_TEXTURE_FIELD.md](../../../docs/CARD_TEXTURE_FIELD.md).
+  pub texture: Option<CardObjectRef>,
+  /// `(aspect_id, value)` pairs parsed from the card's JSON
+  /// `"aspects"` block. Names are translated to ids at registry
+  /// build time via `aspect_id`; an unknown aspect name is a build
+  /// error. Each `aspect_id` appears at most once per definition.
+  ///
+  /// Values are `f32` — the unified registry now hosts entries of
+  /// every category (`Aspect` / `Feature` / `Trait`), and some
+  /// trait-category values are naturally fractional (`forest_2`'s
+  /// `cost: 1.2` wouldn't survive an `i32` round-trip). JSON
+  /// integers parse to whole-number floats (`1` → `1.0`) so the
+  /// previous integer-only consumers keep working unchanged.
+  pub aspects: Vec<(AspectId, f32)>,
   /// Bit-mask of flags applied to every card spawned with this
   /// definition. Currently always 0 — per-definition flag presets are
   /// not declared in card JSON. Kept on the struct because
@@ -590,6 +606,35 @@ impl ClimateAxis {
   }
 }
 
+/// How a stock slot's current value translates into ring-slot
+/// sprites at render time. Defaults to `Count` — today's behaviour
+/// where `cur = N` pushes N copies of the same pseudo-randomly
+/// picked sprite into the tile's ring slots. `Index` flips the
+/// semantic: a single sprite renders, pinned to the pack file
+/// whose basename ends `_<cur>.png`. Cycling the stock value
+/// cycles the visible variant — a low-rent way to express tile
+/// state through art without a new resolver path.
+///
+/// See [docs/STOCK_INDEX_MODE.md](../../../docs/STOCK_INDEX_MODE.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StockMode {
+  Count,
+  Index,
+}
+
+impl StockMode {
+  /// Parse a JSON mode name (lowercase) into the enum. `None` for
+  /// unknown names — the parser surfaces it as a descriptive error.
+  pub fn from_name(name: &str) -> Option<Self> {
+    match name {
+      "count" => Some(Self::Count),
+      "index" => Some(Self::Index),
+      _ => None,
+    }
+  }
+}
+
 /// One row-mutable aspect slot declared on a `CardDefinition`. The
 /// def fixes the aspect identity + bounds; the row carries the
 /// current value in 2 bits of the per-tile u16 (mask `0x3` after
@@ -630,19 +675,24 @@ pub struct StockSlot {
   /// Upper edge of the climate window. Samples above this clamp to
   /// `max` stock. Default 1.0.
   pub climate_axis_max: f32,
+  /// How the slot's current value renders. `Count` (default) places
+  /// `cur` copies of the aspect's sprite into ring slots; `Index`
+  /// places a single sprite pinned to `_<cur>.png`. See
+  /// [`StockMode`].
+  pub mode: StockMode,
 }
 
 impl CardDefinition {
-  /// Look up a trait's value on this definition by `trait_id`.
-  /// Returns `None` if the card doesn't carry that trait — callers
-  /// supply a per-trait default. Used by `movement::tile_cost` to
-  /// read the `cost` trait off a tile def, where "no trait" means
-  /// "default cost." */
-  pub fn trait_value(&self, trait_id: TraitId) -> Option<f32> {
+  /// Look up an aspect's value on this definition by `aspect_id`.
+  /// Returns `None` if the card doesn't carry that aspect — callers
+  /// supply a per-aspect default. Used by `movement::tile_cost` to
+  /// read the `cost` trait-category aspect off a tile def, where
+  /// "no aspect" means "default cost."
+  pub fn aspect_value(&self, aspect_id: AspectId) -> Option<f32> {
     self
-      .traits
+      .aspects
       .iter()
-      .find_map(|(id, v)| (*id == trait_id).then_some(*v))
+      .find_map(|(id, v)| (*id == aspect_id).then_some(*v))
   }
 
   /// Index (0 or 1) of the stock slot tracking `aspect_id` on this
@@ -1102,19 +1152,36 @@ fn parse_card(
     style_str(filename, key, style_arr, 2)?,
   ];
 
-  // Optional top-level sprite filename. Replaces the legacy
-  // `style[3]` / `style[4]` slots; rendered centred on the card.
-  let sprite = match obj.get("sprite") {
-    None => None,
-    Some(Value::String(s)) if s.is_empty() => None,
-    Some(Value::String(s)) => Some(s.clone()),
-    Some(_) => {
-      return Err(format!(
-        "{}: card {}: 'sprite' must be a string filename",
-        filename, key
-      ));
-    }
-  };
+  // Reject the retired `sprite` field outright — every card now
+  // declares its art via the unified `object` field (see
+  // CARD_OBJECT_UNIFICATION.md). A leftover `sprite` after the M3
+  // sweep is almost certainly an authoring slip; surface it loudly
+  // instead of silently rendering nothing.
+  if obj.contains_key("sprite") {
+    return Err(format!(
+      "{}: card {}: 'sprite' field is retired — use 'object': {{ \"name\": ..., \"index\"?: \"<lut-symbol>\" }} instead",
+      filename, key
+    ));
+  }
+
+  // Unified card-art reference. Required shape:
+  //   "object": { "name": "<object_name>", "index"?: "<lut-symbol>" }
+  // Resolves at runtime to `master/<name>/` via the object
+  // registry's render metadata. `index` (when set) is a symbolic
+  // name resolved through the pack's `textures` LUT in objects.json,
+  // baked to an integer at parse time. Omitting it lets the renderer
+  // pseudo-randomly pick from the pack using the card's row id.
+  // Aspects JSON is consulted for `indexFromAspect` on object/texture
+  // refs (build-time bake — the resolved `index` is what flows to the
+  // client), then again immediately below via `parse_aspects` for the
+  // (AspectId, value) pairs that land on the definition.
+  let aspects_json = obj.get("aspects").and_then(Value::as_object);
+  let object = parse_object_ref(filename, key, obj.get("object"), "object", aspects_json)?;
+  // Card-body background texture. Same shape as `object`; resolves
+  // through the same asset pipeline (`master/<name>/[<faction>/]<N>.png`)
+  // but fills the card body instead of layering as foreground art.
+  // See [docs/CARD_TEXTURE_FIELD.md](../../../docs/CARD_TEXTURE_FIELD.md).
+  let texture = parse_object_ref(filename, key, obj.get("texture"), "texture", aspects_json)?;
 
   // `aspects` and `traits` are optional. Empty / missing both mean
   // "no aspects" / "no traits" — most cards declare neither and the
@@ -1127,13 +1194,17 @@ fn parse_card(
       return Err(format!("{}: card {}: 'aspects' not an object", filename, key));
     }
   };
-  let traits = match obj.get("traits") {
-    None => Vec::new(),
-    Some(Value::Object(traits_obj)) => parse_traits(filename, key, traits_obj)?,
-    Some(_) => {
-      return Err(format!("{}: card {}: 'traits' not an object", filename, key));
-    }
-  };
+  // The `"traits": {}` slot was folded into `"aspects": {}` when the
+  // trait registry was unified into the aspect catalog. A leftover
+  // `traits` key on a card is almost certainly a stale declaration
+  // that should have been merged — error out to surface it instead
+  // of silently dropping the values.
+  if obj.contains_key("traits") {
+    return Err(format!(
+      "{}: card {}: 'traits' key is retired — merge entries into 'aspects' (trait names now live in the `traits` section of aspects.json under one unified registry)",
+      filename, key
+    ));
+  }
 
   // `lifecycle` block (or its `magnetic` alias for backwards compat
   // during the lifecycle rewrite): optional. When present, declares
@@ -1187,14 +1258,175 @@ fn parse_card(
     definition_id,
     key: key.to_string(),
     style,
-    sprite,
+    object,
+    texture,
     aspects,
-    traits,
     flags,
     lifecycle_recipe_key,
     lifecycle_duration_ms,
     stock,
   })
+}
+
+/// Parse a `{ "name": "<object_name>", "index"?: "<lut-symbol>", "indexFromAspect"?: "<name>" }`
+/// reference under the given JSON field name. Shared by `object` and
+/// `texture` on `CardDefinition` — same schema, different render role.
+/// `field` is the JSON key (`"object"`, `"texture"`) and is used to
+/// scope error messages.
+///
+/// `index` is a symbolic name resolved through the pack's `textures`
+/// LUT in `objects.json` — raw integer indices are rejected. The
+/// resolved `u32` is what ships to the client (no schema change on
+/// the wire); the symbolic-name layer exists so that sprite re-indexes
+/// only touch one place (the LUT) instead of every card def.
+///
+/// `indexFromAspect: "<name>"` looks up the named aspect's value on
+/// the same card's `aspects` block and uses it as the (build-time-
+/// baked) `index`. Mutually exclusive with explicit `index` — both
+/// set is a parse error so the wins-rule never matters. The referenced
+/// aspect must be declared on this card (`aspects: { <name>: <value> }`)
+/// and its value must be a non-negative u32. Built-in motivator: the
+/// `alter` tile carries `aspects: { level: 1 }` and resolves its art
+/// variant to `<aspect>/<1>.png` via `indexFromAspect: "level"` so
+/// future level increments (level 2, 3, …) just need a parallel def
+/// at the next level value rather than duplicating the
+/// `object: { aspect, index }` wiring with a hand-typed index.
+///
+/// Resolution happens at parse time — the resolved `index` is what
+/// ships to the client. The TS-side `CardDefinition` interface never
+/// sees `indexFromAspect`; from its perspective `{aspect, index}` is
+/// the only shape.
+fn parse_object_ref(
+  filename: &str,
+  key: &str,
+  value: Option<&Value>,
+  field: &str,
+  aspects_json: Option<&serde_json::Map<String, Value>>,
+) -> Result<Option<CardObjectRef>, String> {
+  match value {
+    None => Ok(None),
+    Some(Value::Object(o)) => {
+      let object_name = o
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+          format!(
+            "{}: card {}: '{}.name' missing or not a string",
+            filename, key, field
+          )
+        })?
+        .to_string();
+      // `index` is the symbolic texture name within the named pack
+      // (resolved through `objects.json[<pack>].textures[<symbol>]`).
+      // Raw integers are rejected — re-numbering sprites should only
+      // touch the LUT, never every card def that pins one.
+      let explicit_index = match o.get("index") {
+        None => None,
+        Some(v) => {
+          let sym = v.as_str().ok_or_else(|| {
+            format!(
+              "{}: card {}: '{}.index' must be a string (texture LUT key in objects.json[{:?}].textures); raw integer indices are not allowed",
+              filename, key, field, object_name
+            )
+          })?;
+          let resolved = crate::texture_core::texture_index(&object_name, sym)
+            .map_err(|e| format!("{}: card {}: '{}.index' lookup failed: {}", filename, key, field, e))?
+            .ok_or_else(|| {
+              format!(
+                "{}: card {}: '{}.index' {:?} not found in objects.json[{:?}].textures (add it to the LUT or fix the symbol)",
+                filename, key, field, sym, object_name
+              )
+            })?;
+          Some(resolved)
+        }
+      };
+      let from_aspect_name = match o.get("indexFromAspect") {
+        None => None,
+        Some(v) => Some(
+          v.as_str()
+            .ok_or_else(|| {
+              format!(
+                "{}: card {}: '{}.indexFromAspect' must be an aspect name string",
+                filename, key, field
+              )
+            })?
+            .to_string(),
+        ),
+      };
+      if explicit_index.is_some() && from_aspect_name.is_some() {
+        return Err(format!(
+          "{}: card {}: '{}' declares both 'index' and 'indexFromAspect' — pick one",
+          filename, key, field
+        ));
+      }
+      let index = if let Some(name) = from_aspect_name {
+        let raw = aspects_json
+          .and_then(|m| m.get(&name))
+          .ok_or_else(|| {
+            format!(
+              "{}: card {}: '{}.indexFromAspect' refers to aspect '{}' which is not declared on this card",
+              filename, key, field, name
+            )
+          })?;
+        let n = raw.as_u64().ok_or_else(|| {
+          format!(
+            "{}: card {}: '{}.indexFromAspect' aspect '{}' must hold a non-negative integer value (found {:?})",
+            filename, key, field, name, raw
+          )
+        })?;
+        if n > u32::MAX as u64 {
+          return Err(format!(
+            "{}: card {}: '{}.indexFromAspect' aspect '{}' value {} exceeds u32 max",
+            filename, key, field, name, n
+          ));
+        }
+        Some(n as u32)
+      } else {
+        explicit_index
+      };
+      // Optional `scale: { min, max }` override. Same shape as the
+      // entry in `objects.json` — when present, supersedes the
+      // object's declared scale envelope at render time. Reuses the
+      // same validation as the aspect parser's scale block.
+      let scale = match o.get("scale") {
+        None => None,
+        Some(v) => Some(parse_render_scale(v).map_err(|e| {
+          format!("{}: card {}: '{}.scale' {}", filename, key, field, e)
+        })?),
+      };
+      Ok(Some(CardObjectRef { name: object_name, index, scale }))
+    }
+    Some(_) => Err(format!(
+      "{}: card {}: '{}' must be an object {{ \"name\": ..., \"index\"?: \"<lut-symbol>\", \"indexFromAspect\"?: ..., \"scale\"?: {{ \"min\": ..., \"max\": ... }} }}",
+      filename, key, field
+    )),
+  }
+}
+
+/// Parse a `{ "min": <num>, "max": <num> }` block into a
+/// `RenderScale`. Validates: both finite, `min >= 0`, `max >= min`.
+/// Error messages are caller-prefixed so the same parser works for
+/// `objects.json` and card-side overrides.
+fn parse_render_scale(v: &Value) -> Result<RenderScale, String> {
+  let obj = v.as_object().ok_or_else(|| "must be an object".to_string())?;
+  let min = obj
+    .get("min")
+    .and_then(Value::as_f64)
+    .ok_or_else(|| "min missing or not a number".to_string())? as f32;
+  let max = obj
+    .get("max")
+    .and_then(Value::as_f64)
+    .ok_or_else(|| "max missing or not a number".to_string())? as f32;
+  if !min.is_finite() || !max.is_finite() {
+    return Err(format!("min / max must be finite (got min={}, max={})", min, max));
+  }
+  if min < 0.0 {
+    return Err(format!("min {} must be non-negative", min));
+  }
+  if max < min {
+    return Err(format!("max {} less than min {}", max, min));
+  }
+  Ok(RenderScale { min, max })
 }
 
 /// Maximum value a stock slot can take. u2 width (0..=3); the
@@ -1330,6 +1562,28 @@ fn parse_stock(
       ));
     }
 
+    // Optional render-mode toggle. Omitting defaults to `Count`
+    // (today's behaviour). `Index` switches the slot to single-
+    // sprite-per-value rendering — see `StockMode` + the
+    // STOCK_INDEX_MODE design doc.
+    let mode = match obj.get("mode") {
+      None => StockMode::Count,
+      Some(v) => {
+        let name = v.as_str().ok_or_else(|| {
+          format!(
+            "{}: card {}: stock[{}].mode not a string",
+            filename, key, i
+          )
+        })?;
+        StockMode::from_name(name).ok_or_else(|| {
+          format!(
+            "{}: card {}: stock[{}].mode {:?} is not one of count / index",
+            filename, key, i, name
+          )
+        })?
+      }
+    };
+
     out.push(StockSlot {
       aspect_id: aid,
       max,
@@ -1337,6 +1591,7 @@ fn parse_stock(
       climate_axis,
       climate_axis_min,
       climate_axis_max,
+      mode,
     });
   }
   Ok(out)
@@ -1377,8 +1632,8 @@ fn parse_aspects(
   filename: &str,
   key: &str,
   aspects_obj: &serde_json::Map<String, Value>,
-) -> Result<Vec<(AspectId, i32)>, String> {
-  let mut aspects: Vec<(AspectId, i32)> = Vec::with_capacity(aspects_obj.len());
+) -> Result<Vec<(AspectId, f32)>, String> {
+  let mut aspects: Vec<(AspectId, f32)> = Vec::with_capacity(aspects_obj.len());
   let mut seen: BTreeSet<AspectId> = BTreeSet::new();
   for (aspect_name, aspect_val) in aspects_obj.iter() {
     let id = aspect_id(aspect_name)?.ok_or_else(|| {
@@ -1393,12 +1648,16 @@ fn parse_aspects(
         filename, key, aspect_name
       ));
     }
-    let aspect_value = aspect_val.as_i64().ok_or_else(|| {
+    // `as_f64()` accepts both JSON integers and floats — `2` parses
+    // to `2.0` losslessly, while `1.2` (the `forest_2` tile cost)
+    // survives intact. The single value type covers entries from
+    // every category (`Aspect` / `Feature` / `Trait`).
+    let aspect_value = aspect_val.as_f64().ok_or_else(|| {
       format!(
-        "{}: card {}: aspect {:?} value not an integer",
+        "{}: card {}: aspect {:?} value not a number",
         filename, key, aspect_name
       )
-    })? as i32;
+    })? as f32;
     aspects.push((id, aspect_value));
   }
   Ok(aspects)
@@ -1474,41 +1733,6 @@ fn parse_lifecycle(
   Ok((Some(recipe_key), Some(duration_n as u32)))
 }
 
-fn parse_traits(
-  filename: &str,
-  key: &str,
-  traits_obj: &serde_json::Map<String, Value>,
-) -> Result<Vec<(TraitId, f32)>, String> {
-  let mut traits: Vec<(TraitId, f32)> = Vec::with_capacity(traits_obj.len());
-  let mut seen: BTreeSet<TraitId> = BTreeSet::new();
-  for (trait_name, trait_val) in traits_obj.iter() {
-    let id = trait_id(trait_name)?.ok_or_else(|| {
-      format!(
-        "{}: card {}: unknown trait {:?} (not declared in traits.json)",
-        filename, key, trait_name
-      )
-    })?;
-    if !seen.insert(id) {
-      return Err(format!(
-        "{}: card {}: trait {:?} listed more than once",
-        filename, key, trait_name
-      ));
-    }
-    // `as_f64()` accepts both JSON integers and floats — a trait value
-    // of `1` parses to `1.0` losslessly, while `1.2` (the `forest_2`
-    // tile cost) survives intact. Rejecting non-numeric values keeps
-    // the error message specific.
-    let trait_value = trait_val.as_f64().ok_or_else(|| {
-      format!(
-        "{}: card {}: trait {:?} value not a number",
-        filename, key, trait_name
-      )
-    })? as f32;
-    traits.push((id, trait_value));
-  }
-  Ok(traits)
-}
-
 fn style_str(filename: &str, key: &str, arr: &[Value], idx: usize) -> Result<String, String> {
   let s = arr[idx]
     .as_str()
@@ -1556,5 +1780,30 @@ mod tests {
   #[test]
   fn lifecycle_recipes_resolve() {
     validate_lifecycle_recipes().expect("lifecycle recipe validation");
+  }
+
+  /// Sub-aspects that omit description (or set it to `""`) must
+  /// inherit from the nearest ancestor that declared one. Children
+  /// that declare their own description keep it. Roots with an
+  /// empty description stay empty.
+  #[test]
+  fn description_inherits_from_ancestor() {
+    let reg = build_aspects().expect("aspects.json parses");
+    let by_name = |n: &str| {
+      let id = *reg.id_by_name.get(n).unwrap_or_else(|| panic!("aspect {n} missing"));
+      &reg.by_id[(id - 1) as usize]
+    };
+    // berry / fuel omit description → inherit from food / fire.
+    assert_eq!(by_name("berry").description, "Sustenance, edible produce");
+    assert_eq!(by_name("fuel").description, "Combustible energy source");
+    // Children with their own description keep it.
+    assert_eq!(by_name("pine").description, "Pine — fast-growing softwood");
+    assert_eq!(by_name("corpus+").description, "Standard corpus — baseline vitality");
+    // Roots with explicitly empty descriptions stay empty.
+    assert_eq!(by_name("anima").description, "");
+    assert_eq!(by_name("sollertia").description, "");
+    // Sanity: icon/color inheritance still works for the same children.
+    assert_eq!(by_name("berry").icon, by_name("food").icon);
+    assert_eq!(by_name("berry").color, by_name("food").color);
   }
 }
