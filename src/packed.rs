@@ -7,11 +7,13 @@
 //   valid_at         u64 = [time_ms: u48 | sequence: u16]                   (high | low)
 //                          — see `pack_valid_at` below and `sequence.rs`
 //                          for how the u16 disambiguator is allocated.
-//   macro_zone       u64 = [reserved: u32 | q: i16 | r: i16]                (high | low)
-//                          — the low 32 bits hold today's value (world
-//                          chunk (q, r), or a bare id on non-world
-//                          surfaces); the high 32 bits are reserved for a
-//                          future addressing axis and are always 0 today.
+//   macro_zone       u64 = [owner_card_id: u32 | surface: u8 | zone_q: i12 | zone_r: i12]
+//                          (high → low). The complete location key.
+//                          `owner_card_id` (bits 32-63) is the card_id that
+//                          owns the zone (`0` = WORLD; ids 0..1023 reserved).
+//                          `surface` is bits 24-31. The payload is always two
+//                          signed 12-bit coords (q at 12-23, r at 0-11), read
+//                          as (q,r) or (x,y) per surface.
 //   micro_zone       u8  — TWO INTERPRETATIONS, gated by (stacked_state, surface):
 //     stack layout — state == OnRoot AND surface < WORLD_LAYER:
 //                   u8 = [position: u4 | direction: u2 | stacked_state: u2]
@@ -179,13 +181,77 @@ pub fn valid_at_time(v: u64) -> u64 {
 }
 
 // ---- macro_zone --------------------------------------------------------
+//
+// `macro_zone` is the complete, uniform location key:
+//
+//   [ owner_card_id:u32 (63-32) | surface:u8 (31-24) | zone_q:i12 | zone_r:i12 ]
+//
+// The complete location key. `owner_card_id` (bits 32-63) is the card_id that
+// owns the zone — `0` is the WORLD sentinel (card ids 0..1023 are reserved;
+// see `cards::FIRST_CARD_ID`). `surface` is bits 24-31. The payload is always
+// two signed 12-bit coordinates (`zone_q` at bits 12-23, `zone_r` at 0-11) —
+// read as `(q, r)` or `(x, y)` per surface; `(0, 0)` for single-chunk surfaces
+// like inventory, whose item positions live in `micro_zone` / `micro_location`.
 
+/// Sign-extend the 12-bit field at `shift` of `v` into an `i16`.
+fn macro_coord(v: u64, shift: u32) -> i16 {
+    let s = ((v >> shift) & 0xFFF) as i16;
+    if s & 0x800 != 0 { s - 0x1000 } else { s }
+}
+
+/// Pack the **world payload** (chunk coords) into bits 0-23. Combine with
+/// [`with_surface`] to produce a full `macro_zone`.
 pub fn pack_macro_zone(q: i16, r: i16) -> u64 {
-    ((q as u16 as u64) << 16) | (r as u16 as u64)
+    (((q as u16 as u64) & 0xFFF) << 12) | ((r as u16 as u64) & 0xFFF)
 }
 
 pub fn unpack_macro_zone(v: u64) -> (i16, i16) {
-    (((v >> 16) & 0xFFFF) as u16 as i16, (v & 0xFFFF) as u16 as i16)
+    (macro_coord(v, 12), macro_coord(v, 0))
+}
+
+/// Bit offset of the `surface` byte within `macro_zone`.
+pub const MACRO_SURFACE_SHIFT: u32 = 24;
+
+/// Read the `surface` band (bits 24-31) out of a `macro_zone`.
+pub fn surface_of(v: u64) -> u8 {
+    ((v >> MACRO_SURFACE_SHIFT) & 0xFF) as u8
+}
+
+/// Set the `surface` band (bits 24-31), preserving the payload (bits 0-23)
+/// and the reserved u32 (bits 32-63). The single combiner for building a
+/// `macro_zone`: `with_surface(pack_macro_zone(q, r), WORLD_LAYER)` for world,
+/// `with_surface(id as u64, INVENTORY_LAYER)` for a container.
+pub fn with_surface(v: u64, surface: u8) -> u64 {
+    (v & !(0xFFu64 << MACRO_SURFACE_SHIFT)) | ((surface as u64) << MACRO_SURFACE_SHIFT)
+}
+
+/// Read the 24-bit coordinate payload (bits 0-23) — the raw packed `(q, r)`.
+pub fn macro_payload(v: u64) -> u32 {
+    (v & 0x00FF_FFFF) as u32
+}
+
+/// Bit offset of the `owner_card_id` field within `macro_zone`.
+pub const MACRO_OWNER_SHIFT: u32 = 32;
+
+/// Read the `owner_card_id` band (bits 32-63) — the card_id that owns the
+/// zone; `0` is the WORLD sentinel.
+pub fn owner_of(v: u64) -> u32 {
+    (v >> MACRO_OWNER_SHIFT) as u32
+}
+
+/// Set the `owner_card_id` band (bits 32-63), preserving the low 32 bits
+/// (surface + coords).
+pub fn with_owner(v: u64, owner: u32) -> u64 {
+    (v & 0x0000_0000_FFFF_FFFF) | ((owner as u64) << MACRO_OWNER_SHIFT)
+}
+
+/// Build a complete `macro_zone` from its fields. The single server-side
+/// combiner: `owner_card_id` in bits 32-63, `surface` in 24-31, and the two
+/// signed 12-bit coords in the low 24. World uses `owner = 0`; container
+/// surfaces (inventory / mini_zone / pocket) pass the soul / anchor card_id as
+/// the owner with `(q, r) = (0, 0)`.
+pub fn pack_macro_zone_full(owner: u32, surface: u8, q: i16, r: i16) -> u64 {
+    with_owner(with_surface(pack_macro_zone(q, r), surface), owner)
 }
 
 // ---- micro_zone --------------------------------------------------------
@@ -558,12 +624,57 @@ mod tests {
     fn macro_zone_signed_roundtrip() {
         let v = pack_macro_zone(-1, 1);
         assert_eq!(unpack_macro_zone(v), (-1, 1));
-        let v = pack_macro_zone(i16::MIN, i16::MAX);
-        assert_eq!(unpack_macro_zone(v), (i16::MIN, i16::MAX));
-        // The high 32 bits are reserved for a future addressing axis and
-        // must stay zero today — even with both coords at their extremes.
+        // i12 extremes: -2048 (0x800) .. 2047 (0x7FF).
+        let v = pack_macro_zone(-2048, 2047);
+        assert_eq!(unpack_macro_zone(v), (-2048, 2047));
+        let v = pack_macro_zone(2047, -2048);
+        assert_eq!(unpack_macro_zone(v), (2047, -2048));
+        // The payload occupies only bits 0-23 — surface (24-31) and the
+        // reserved u32 (32-63) stay zero before folding, even at the extremes.
+        assert_eq!(pack_macro_zone(-2048, -2048) >> 24, 0);
+        assert_eq!(pack_macro_zone(2047, 2047) >> 24, 0);
+    }
+
+    #[test]
+    fn macro_zone_surface_roundtrip() {
+        // World: fold surface over the coord payload; both round-trip and
+        // the reserved u32 band stays zero.
+        let v = with_surface(pack_macro_zone(-2048, 2047), WORLD_LAYER);
+        assert_eq!(surface_of(v), WORLD_LAYER);
+        assert_eq!(unpack_macro_zone(v), (-2048, 2047));
         assert_eq!(v >> 32, 0);
-        assert_eq!(pack_macro_zone(-1, -1) >> 32, 0);
+        // Non-world: a container id in the 24-bit payload + a surface band.
+        let v = with_surface(0x00AB_CDEF, MINI_ZONE_LAYER);
+        assert_eq!(surface_of(v), MINI_ZONE_LAYER);
+        assert_eq!(macro_payload(v), 0x00AB_CDEF);
+        assert_eq!(v >> 32, 0);
+        // with_surface replaces the band without touching the payload.
+        let v = with_surface(with_surface(0x00123456, INVENTORY_LAYER), WORLD_LAYER);
+        assert_eq!(surface_of(v), WORLD_LAYER);
+        assert_eq!(macro_payload(v), 0x00123456);
+    }
+
+    #[test]
+    fn macro_zone_owner_roundtrip() {
+        // Full address: owner card_id + surface + signed coords. Exercise a
+        // high owner id (top bit of the u32 set) and the coord extremes.
+        let owner: u32 = 0xC000_0001;
+        let v = pack_macro_zone_full(owner, INVENTORY_LAYER, 0, 0);
+        assert_eq!(owner_of(v), owner);
+        assert_eq!(surface_of(v), INVENTORY_LAYER);
+        assert_eq!(unpack_macro_zone(v), (0, 0));
+
+        let v = pack_macro_zone_full(0, WORLD_LAYER, -2048, 2047);
+        assert_eq!(owner_of(v), 0); // WORLD sentinel
+        assert_eq!(surface_of(v), WORLD_LAYER);
+        assert_eq!(unpack_macro_zone(v), (-2048, 2047));
+
+        // with_owner replaces only the owner band, preserving surface + coords.
+        let base = pack_macro_zone_full(1024, MINI_ZONE_LAYER, 5, -3);
+        let re = with_owner(base, 2048);
+        assert_eq!(owner_of(re), 2048);
+        assert_eq!(surface_of(re), MINI_ZONE_LAYER);
+        assert_eq!(unpack_macro_zone(re), (5, -3));
     }
 
     #[test]
