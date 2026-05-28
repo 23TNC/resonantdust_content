@@ -20,10 +20,6 @@
 //! - [`recipe_core`]   recipe registry, built lazily from the JSON catalogs
 //!                   in `content/recipes/`. Resolves `"@<type>"` entities and
 //!                   aspect names through `definition_core`.
-//! - [`starter_pack_core`] starter-pack registry, built lazily from
-//!                   `content/starter_packs/`. Each pack is a soul-scoped
-//!                   bundle of card-key → count pairs; card keys are
-//!                   resolved through `definition_core`.
 //! - [`blueprint_core`] blueprint registry, built lazily from
 //!                   `content/blueprints/`. Each blueprint is a named
 //!                   build-plan whose body currently carries just a
@@ -46,7 +42,6 @@ pub mod recipe_core;
 pub mod recipe_statement;
 pub mod recipe_tape;
 pub mod recipe_aliases;
-pub mod starter_pack_core;
 pub mod blueprint_core;
 pub mod texture_core;
 pub mod flags_core;
@@ -56,8 +51,8 @@ pub mod locales_core;
 mod wasm_api;
 
 /// `(rel_path, contents)` slices for every `*.json` under `cards/data/`,
-/// `recipes/data/`, `starter_packs/data/`, `textures/data/`, and
-/// `locales/`, populated at compile time by `build.rs`. The registries
+/// `recipes/data/`, `textures/data/`, and `locales/`, populated at
+/// compile time by `build.rs`. The registries
 /// iterate these instead of hard-coding filenames, so adding / removing
 /// / renaming a data file needs no source edit — cargo notices via the
 /// build script's `rerun-if-changed` hooks and the slice regenerates.

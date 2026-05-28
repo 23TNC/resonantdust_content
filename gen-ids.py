@@ -395,16 +395,6 @@ def gen_blueprint_ids(data_dir: Path, skip_known: bool) -> bool:
     return _gen_blueprint_scope_ids(data_dir, "blueprints", skip_known)
 
 
-def gen_player_blueprint_ids(data_dir: Path, skip_known: bool) -> bool:
-    """Player-scope blueprints — same shape as soul blueprints but
-    in a separate id namespace under `content/player_blueprints/`.
-    Card_type is `player_blueprint` (id=3); soul-scope uses
-    `blueprint` (id=1). Keeping the registries independent lets
-    both grow without def_id collisions and makes per-scope
-    enumeration (for the dna panel vs the wrench panel) trivial."""
-    return _gen_blueprint_scope_ids(data_dir, "player_blueprints", skip_known)
-
-
 def _gen_blueprint_scope_ids(data_dir: Path, subdir: str, skip_known: bool) -> bool:
     """Blueprints share one flat id namespace per scope, same shape
     as recipes — `{ "<blueprint_key>": <stable-int>, ... }`. The body
@@ -893,10 +883,6 @@ def main():
 
     print("Blueprints:")
     if not gen_blueprint_ids(data_dir, args.skip_known):
-        ok = False
-
-    print("Player Blueprints:")
-    if not gen_player_blueprint_ids(data_dir, args.skip_known):
         ok = False
 
     # Textures: previously had their own id.json under

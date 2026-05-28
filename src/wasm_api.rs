@@ -31,15 +31,10 @@ use crate::recipe_core::{
   recipe as core_recipe,
   recipes_by_priority as core_recipes_by_priority,
 };
-use crate::starter_pack_core::{
-  starter_blueprints_for_soul as core_starter_blueprints_for_soul,
-  starter_packs_for_soul as core_starter_packs_for_soul,
-};
 use crate::blueprint_core::{
   blueprint as core_blueprint,
   blueprints_all as core_blueprints_all,
   find_blueprint as core_find_blueprint,
-  BlueprintScope,
 };
 use crate::texture_core::textures as core_textures;
 
@@ -332,38 +327,12 @@ pub fn recipes_all() -> Result<JsValue, JsValue> {
   serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// All starter packs registered for a given soul card key (e.g.
-/// `"human"`). Returns an array of `StarterPack` objects (`id`,
-/// `soul`, `packId`, `contents: [{cardKey, packedDefinition,
-/// count}]`). Empty array for unknown soul keys. Throws on
+/// Look up a blueprint by its stable `u16` id. Returns the full
+/// Blueprint object or `null` if the id isn't registered. Throws on
 /// registry-build failure.
-///
-/// Used by the character-create panel to enumerate which packs the
-/// player can pick from. JS-side filtering by soul is unnecessary
-/// since this is already soul-scoped at the call site.
-#[wasm_bindgen(js_name = starterPacksForSoul)]
-pub fn starter_packs_for_soul(soul: &str) -> Result<JsValue, JsValue> {
-  let packs = core_starter_packs_for_soul(soul).map_err(|e| JsValue::from_str(&e))?;
-  serde_wasm_bindgen::to_value(&packs).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-/// Stable blueprint ids granted to a player on creating a character
-/// of the given soul. Sourced from the soul's `"blueprints"` array in
-/// `starter_packs/data/*.json`. Returns an empty array for souls that
-/// don't declare any. Throws on registry-build failure.
-///
-/// Each id resolves to a full `Blueprint` via `blueprintById`.
-#[wasm_bindgen(js_name = starterBlueprintsForSoul)]
-pub fn starter_blueprints_for_soul(soul: &str) -> Result<Vec<u16>, JsValue> {
-  core_starter_blueprints_for_soul(soul).map_err(|e| JsValue::from_str(&e))
-}
-
-/// Look up a soul-scope blueprint by its stable `u16` id. Returns
-/// the full Blueprint object or `null` if the id isn't registered.
-/// Throws on registry-build failure.
 #[wasm_bindgen(js_name = blueprintById)]
 pub fn blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
-  let opt = core_blueprint(BlueprintScope::Soul, id).map_err(|e| JsValue::from_str(&e))?;
+  let opt = core_blueprint(id).map_err(|e| JsValue::from_str(&e))?;
   match opt {
     Some(bp) => serde_wasm_bindgen::to_value(bp)
       .map_err(|e| JsValue::from_str(&e.to_string())),
@@ -371,11 +340,11 @@ pub fn blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
   }
 }
 
-/// Look up a soul-scope blueprint by its source-key. Returns the
-/// full Blueprint object or `null`. Throws on registry-build failure.
+/// Look up a blueprint by its source-key. Returns the full Blueprint
+/// object or `null`. Throws on registry-build failure.
 #[wasm_bindgen(js_name = blueprintByKey)]
 pub fn blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
-  let opt = core_find_blueprint(BlueprintScope::Soul, key).map_err(|e| JsValue::from_str(&e))?;
+  let opt = core_find_blueprint(key).map_err(|e| JsValue::from_str(&e))?;
   match opt {
     Some(bp) => serde_wasm_bindgen::to_value(bp)
       .map_err(|e| JsValue::from_str(&e.to_string())),
@@ -383,41 +352,11 @@ pub fn blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
   }
 }
 
-/// Every registered soul-scope blueprint in stable-id order.
-/// Called by the wrench panel to enumerate the catalog for display.
+/// Every registered blueprint in stable-id order. Called by the
+/// wrench panel to enumerate the catalog for display.
 #[wasm_bindgen(js_name = allBlueprints)]
 pub fn all_blueprints() -> Result<JsValue, JsValue> {
-  let bps = core_blueprints_all(BlueprintScope::Soul).map_err(|e| JsValue::from_str(&e))?;
-  serde_wasm_bindgen::to_value(&bps).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-/// Player-scope analog of [`blueprint_by_id`].
-#[wasm_bindgen(js_name = playerBlueprintById)]
-pub fn player_blueprint_by_id(id: u16) -> Result<JsValue, JsValue> {
-  let opt = core_blueprint(BlueprintScope::Player, id).map_err(|e| JsValue::from_str(&e))?;
-  match opt {
-    Some(bp) => serde_wasm_bindgen::to_value(bp)
-      .map_err(|e| JsValue::from_str(&e.to_string())),
-    None => Ok(JsValue::NULL),
-  }
-}
-
-/// Player-scope analog of [`blueprint_by_key`].
-#[wasm_bindgen(js_name = playerBlueprintByKey)]
-pub fn player_blueprint_by_key(key: &str) -> Result<JsValue, JsValue> {
-  let opt = core_find_blueprint(BlueprintScope::Player, key).map_err(|e| JsValue::from_str(&e))?;
-  match opt {
-    Some(bp) => serde_wasm_bindgen::to_value(bp)
-      .map_err(|e| JsValue::from_str(&e.to_string())),
-    None => Ok(JsValue::NULL),
-  }
-}
-
-/// Player-scope analog of [`all_blueprints`]. Called by the dna
-/// (🧬) panel to enumerate the player-blueprint catalog.
-#[wasm_bindgen(js_name = allPlayerBlueprints)]
-pub fn all_player_blueprints() -> Result<JsValue, JsValue> {
-  let bps = core_blueprints_all(BlueprintScope::Player).map_err(|e| JsValue::from_str(&e))?;
+  let bps = core_blueprints_all().map_err(|e| JsValue::from_str(&e))?;
   serde_wasm_bindgen::to_value(&bps).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -469,7 +408,7 @@ pub fn valid_at_time(packed: u64) -> u64 {
 }
 
 #[wasm_bindgen(js_name = packMacroZone)]
-pub fn pack_macro_zone(q: i16, r: i16) -> u32 {
+pub fn pack_macro_zone(q: i16, r: i16) -> u64 {
   core_packed::pack_macro_zone(q, r)
 }
 
@@ -481,7 +420,7 @@ struct MacroZoneUnpacked {
 }
 
 #[wasm_bindgen(js_name = unpackMacroZone)]
-pub fn unpack_macro_zone(v: u32) -> Result<JsValue, JsValue> {
+pub fn unpack_macro_zone(v: u64) -> Result<JsValue, JsValue> {
   let (q, r) = core_packed::unpack_macro_zone(v);
   serde_wasm_bindgen::to_value(&MacroZoneUnpacked { q, r })
     .map_err(|e| JsValue::from_str(&e.to_string()))

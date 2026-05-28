@@ -1,25 +1,12 @@
 /* @ts-self-types="./resonantdust_content.d.ts" */
 
 /**
- * Every registered soul-scope blueprint in stable-id order.
- * Called by the wrench panel to enumerate the catalog for display.
+ * Every registered blueprint in stable-id order. Called by the
+ * wrench panel to enumerate the catalog for display.
  * @returns {any}
  */
 export function allBlueprints() {
     const ret = wasm.allBlueprints();
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
-}
-
-/**
- * Player-scope analog of [`all_blueprints`]. Called by the dna
- * (🧬) panel to enumerate the player-blueprint catalog.
- * @returns {any}
- */
-export function allPlayerBlueprints() {
-    const ret = wasm.allPlayerBlueprints();
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -120,9 +107,9 @@ export function aspectValue(packed_def, name) {
 }
 
 /**
- * Look up a soul-scope blueprint by its stable `u16` id. Returns
- * the full Blueprint object or `null` if the id isn't registered.
- * Throws on registry-build failure.
+ * Look up a blueprint by its stable `u16` id. Returns the full
+ * Blueprint object or `null` if the id isn't registered. Throws on
+ * registry-build failure.
  * @param {number} id
  * @returns {any}
  */
@@ -135,8 +122,8 @@ export function blueprintById(id) {
 }
 
 /**
- * Look up a soul-scope blueprint by its source-key. Returns the
- * full Blueprint object or `null`. Throws on registry-build failure.
+ * Look up a blueprint by its source-key. Returns the full Blueprint
+ * object or `null`. Throws on registry-build failure.
  * @param {string} key
  * @returns {any}
  */
@@ -437,11 +424,11 @@ export function packDefinition(card_type, def_id) {
 /**
  * @param {number} q
  * @param {number} r
- * @returns {number}
+ * @returns {bigint}
  */
 export function packMacroZone(q, r) {
     const ret = wasm.packMacroZone(q, r);
-    return ret >>> 0;
+    return BigInt.asUintN(64, ret);
 }
 
 /**
@@ -492,34 +479,6 @@ export function packValidAt(time_ms, sequence) {
 export function packZoneDefinition(card_type) {
     const ret = wasm.packZoneDefinition(card_type);
     return ret;
-}
-
-/**
- * Player-scope analog of [`blueprint_by_id`].
- * @param {number} id
- * @returns {any}
- */
-export function playerBlueprintById(id) {
-    const ret = wasm.playerBlueprintById(id);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
-}
-
-/**
- * Player-scope analog of [`blueprint_by_key`].
- * @param {string} key
- * @returns {any}
- */
-export function playerBlueprintByKey(key) {
-    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.playerBlueprintByKey(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -597,51 +556,6 @@ export function recipesAll() {
 }
 
 /**
- * Stable blueprint ids granted to a player on creating a character
- * of the given soul. Sourced from the soul's `"blueprints"` array in
- * `starter_packs/data/*.json`. Returns an empty array for souls that
- * don't declare any. Throws on registry-build failure.
- *
- * Each id resolves to a full `Blueprint` via `blueprintById`.
- * @param {string} soul
- * @returns {Uint16Array}
- */
-export function starterBlueprintsForSoul(soul) {
-    const ptr0 = passStringToWasm0(soul, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.starterBlueprintsForSoul(ptr0, len0);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v2 = getArrayU16FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 2, 2);
-    return v2;
-}
-
-/**
- * All starter packs registered for a given soul card key (e.g.
- * `"human"`). Returns an array of `StarterPack` objects (`id`,
- * `soul`, `packId`, `contents: [{cardKey, packedDefinition,
- * count}]`). Empty array for unknown soul keys. Throws on
- * registry-build failure.
- *
- * Used by the character-create panel to enumerate which packs the
- * player can pick from. JS-side filtering by soul is unnecessary
- * since this is already soul-scoped at the call site.
- * @param {string} soul
- * @returns {any}
- */
-export function starterPacksForSoul(soul) {
-    const ptr0 = passStringToWasm0(soul, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.starterPacksForSoul(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
-}
-
-/**
  * @param {number} v
  * @returns {any}
  */
@@ -654,7 +568,7 @@ export function unpackDefinition(v) {
 }
 
 /**
- * @param {number} v
+ * @param {bigint} v
  * @returns {any}
  */
 export function unpackMacroZone(v) {
@@ -717,7 +631,7 @@ export function worldLayer() {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg_Error_bce6d499ff0a4aff: function(arg0, arg1) {
+        __wbg_Error_ef53bc310eb298a0: function(arg0, arg1) {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return ret;
         },
@@ -728,34 +642,34 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
-        __wbg___wbindgen_is_string_dde0fd9020db4434: function(arg0) {
+        __wbg___wbindgen_is_string_c236cabd84a4d769: function(arg0) {
             const ret = typeof(arg0) === 'string';
             return ret;
         },
-        __wbg___wbindgen_throw_9c31b086c2b26051: function(arg0, arg1) {
+        __wbg___wbindgen_throw_1506f2235d1bdba0: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_new_02d162bc6cf02f60: function() {
-            const ret = new Object();
-            return ret;
-        },
-        __wbg_new_070df68d66325372: function() {
+        __wbg_new_622fc80556be2e26: function() {
             const ret = new Map();
             return ret;
         },
-        __wbg_new_310879b66b6e95e1: function() {
+        __wbg_new_ce1ab61c1c2b300d: function() {
+            const ret = new Object();
+            return ret;
+        },
+        __wbg_new_d90091b82fdf5b91: function() {
             const ret = new Array();
+            return ret;
+        },
+        __wbg_set_52b1e1eb5bed906a: function(arg0, arg1, arg2) {
+            const ret = arg0.set(arg1, arg2);
             return ret;
         },
         __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
             arg0[arg1] = arg2;
         },
-        __wbg_set_78ea6a19f4818587: function(arg0, arg1, arg2) {
+        __wbg_set_dca99999bba88a9a: function(arg0, arg1, arg2) {
             arg0[arg1 >>> 0] = arg2;
-        },
-        __wbg_set_facb7a5914e0fa39: function(arg0, arg1, arg2) {
-            const ret = arg0.set(arg1, arg2);
-            return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
@@ -788,11 +702,6 @@ function __wbg_get_imports() {
     };
 }
 
-function getArrayU16FromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
-}
-
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -808,14 +717,6 @@ function getDataViewMemory0() {
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
-}
-
-let cachedUint16ArrayMemory0 = null;
-function getUint16ArrayMemory0() {
-    if (cachedUint16ArrayMemory0 === null || cachedUint16ArrayMemory0.byteLength === 0) {
-        cachedUint16ArrayMemory0 = new Uint16Array(wasm.memory.buffer);
-    }
-    return cachedUint16ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -904,7 +805,6 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
-    cachedUint16ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

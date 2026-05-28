@@ -20,9 +20,7 @@ fn main() {
   let mut out = String::new();
   emit_list(&manifest_dir, "cards/data", "CARDS_FILES", &mut out);
   emit_list(&manifest_dir, "recipes/data", "RECIPES_FILES", &mut out);
-  emit_list(&manifest_dir, "starter_packs/data", "STARTER_PACKS_FILES", &mut out);
   emit_list(&manifest_dir, "blueprints/data", "BLUEPRINTS_FILES", &mut out);
-  emit_list(&manifest_dir, "player_blueprints/data", "PLAYER_BLUEPRINTS_FILES", &mut out);
   // Locale catalogs: `locales/<domain>/<lang>.json`. The `<domain>`
   // matches a source-data tree name (`cards`, `recipes`, …); `<lang>`
   // is a BCP-47-ish short code (`en`, future `fr`, etc.). The loader

@@ -7,7 +7,11 @@
 //   valid_at         u64 = [time_ms: u48 | sequence: u16]                   (high | low)
 //                          — see `pack_valid_at` below and `sequence.rs`
 //                          for how the u16 disambiguator is allocated.
-//   macro_zone       u32 = [q: i16 | r: i16]                                (high | low)
+//   macro_zone       u64 = [reserved: u32 | q: i16 | r: i16]                (high | low)
+//                          — the low 32 bits hold today's value (world
+//                          chunk (q, r), or a bare id on non-world
+//                          surfaces); the high 32 bits are reserved for a
+//                          future addressing axis and are always 0 today.
 //   micro_zone       u8  — TWO INTERPRETATIONS, gated by (stacked_state, surface):
 //     stack layout — state == OnRoot AND surface < WORLD_LAYER:
 //                   u8 = [position: u4 | direction: u2 | stacked_state: u2]
@@ -127,22 +131,6 @@ impl StackedState {
 // - POCKET_DIMENSION_LAYER (32):   `macro_zone` = the anchor card's
 //                                  `card_id`. A private interior
 //                                  carried by an anchor card.
-// - PLAYER_DIMENSION_LAYER (62):   `macro_zone` = packed
-//                                  `(chunkQ:i16, chunkR:i16)` (same
-//                                  encoding as world). Owner_id is
-//                                  the player_id discriminator —
-//                                  multiple players' dimensions
-//                                  coexist at the same macro_zone
-//                                  and are disambiguated by the
-//                                  Zone's / Card's `owner_id`
-//                                  field. A player-wide private
-//                                  world that all of a player's
-//                                  souls can visit. Lookups MUST go
-//                                  through `latest_for_owner` /
-//                                  owner-aware tile reads — the
-//                                  unkeyed `latest_for` would
-//                                  return whichever player's row
-//                                  has the highest valid_at_time.
 // - MINI_ZONE_LAYER (63):          `macro_zone` = the anchor card's
 //                                  `card_id`. A radius-3 hex disk
 //                                  overlaying the world wherever
@@ -162,7 +150,6 @@ impl StackedState {
 pub const INVENTORY_LAYER: u8 = 1;
 pub const PLAYER_INVENTORY_LAYER: u8 = 2;
 pub const POCKET_DIMENSION_LAYER: u8 = 32;
-pub const PLAYER_DIMENSION_LAYER: u8 = 62;
 pub const MINI_ZONE_LAYER: u8 = 63;
 pub const WORLD_LAYER: u8 = 64;
 
@@ -193,12 +180,12 @@ pub fn valid_at_time(v: u64) -> u64 {
 
 // ---- macro_zone --------------------------------------------------------
 
-pub fn pack_macro_zone(q: i16, r: i16) -> u32 {
-    ((q as u16 as u32) << 16) | (r as u16 as u32)
+pub fn pack_macro_zone(q: i16, r: i16) -> u64 {
+    ((q as u16 as u64) << 16) | (r as u16 as u64)
 }
 
-pub fn unpack_macro_zone(v: u32) -> (i16, i16) {
-    ((v >> 16) as u16 as i16, v as u16 as i16)
+pub fn unpack_macro_zone(v: u64) -> (i16, i16) {
+    (((v >> 16) & 0xFFFF) as u16 as i16, (v & 0xFFFF) as u16 as i16)
 }
 
 // ---- micro_zone --------------------------------------------------------
@@ -573,6 +560,10 @@ mod tests {
         assert_eq!(unpack_macro_zone(v), (-1, 1));
         let v = pack_macro_zone(i16::MIN, i16::MAX);
         assert_eq!(unpack_macro_zone(v), (i16::MIN, i16::MAX));
+        // The high 32 bits are reserved for a future addressing axis and
+        // must stay zero today — even with both coords at their extremes.
+        assert_eq!(v >> 32, 0);
+        assert_eq!(pack_macro_zone(-1, -1) >> 32, 0);
     }
 
     #[test]

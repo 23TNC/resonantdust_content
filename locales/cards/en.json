@@ -159,6 +159,12 @@
     }
   },
   "soul": {
+    "player_soul": {
+      "label": "Player",
+      "description": {
+        "simple": "You — a thin soul that owns and acts through the souls in your care."
+      }
+    },
     "human": {
       "label": "Human",
       "description": {
@@ -251,7 +257,7 @@
     "alter": {
       "label": "Alter",
       "description": {
-        "simple": "A consecrated structure at the heart of the pocket dimension. Its appearance changes as its level rises."
+        "simple": "A consecrated structure. Its appearance changes as its level rises."
       }
     },
     "empty": {
@@ -279,11 +285,6 @@
   "blueprint": {
     "blueprint_nd_furnace": {
       "label": "Furnace"
-    }
-  },
-  "player_blueprint": {
-    "player_blueprint_soul_slot": {
-      "label": "player_blueprint_soul_slot"
     }
   }
 }

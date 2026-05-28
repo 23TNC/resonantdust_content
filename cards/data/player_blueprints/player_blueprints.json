@@ -1,8 +1,0 @@
-{
-  "_comment": "Player-blueprint card definitions — one per content/player_blueprints/data/ entry. Renders in the dna (🧬) panel; the discovery bit lives on PlayerProfile.blueprints_0 (bit position = player-blueprint id - 1).",
-  "player_blueprint": {
-    "player_blueprint_soul_slot": {
-      "style": [ "#5A2D82", "#7B3FA8", "#F0E6FF" ]
-    }
-  }
-}

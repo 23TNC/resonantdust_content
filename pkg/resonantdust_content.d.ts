@@ -2,16 +2,10 @@
 /* eslint-disable */
 
 /**
- * Every registered soul-scope blueprint in stable-id order.
- * Called by the wrench panel to enumerate the catalog for display.
+ * Every registered blueprint in stable-id order. Called by the
+ * wrench panel to enumerate the catalog for display.
  */
 export function allBlueprints(): any;
-
-/**
- * Player-scope analog of [`all_blueprints`]. Called by the dna
- * (🧬) panel to enumerate the player-blueprint catalog.
- */
-export function allPlayerBlueprints(): any;
 
 /**
  * Every registered texture definition, in stable-id order. Each entry
@@ -71,15 +65,15 @@ export function aspectInfo(id: number): any;
 export function aspectValue(packed_def: number, name: string): number | undefined;
 
 /**
- * Look up a soul-scope blueprint by its stable `u16` id. Returns
- * the full Blueprint object or `null` if the id isn't registered.
- * Throws on registry-build failure.
+ * Look up a blueprint by its stable `u16` id. Returns the full
+ * Blueprint object or `null` if the id isn't registered. Throws on
+ * registry-build failure.
  */
 export function blueprintById(id: number): any;
 
 /**
- * Look up a soul-scope blueprint by its source-key. Returns the
- * full Blueprint object or `null`. Throws on registry-build failure.
+ * Look up a blueprint by its source-key. Returns the full Blueprint
+ * object or `null`. Throws on registry-build failure.
  */
 export function blueprintByKey(key: string): any;
 
@@ -197,7 +191,7 @@ export function miniZoneLayer(): number;
 
 export function packDefinition(card_type: number, def_id: number): number;
 
-export function packMacroZone(q: number, r: number): number;
+export function packMacroZone(q: number, r: number): bigint;
 
 export function packMicroZone(q: number, r: number, stacked_state: number): number;
 
@@ -208,16 +202,6 @@ export function packStackMicroZone(position: number, direction: number, stacked_
 export function packValidAt(time_ms: bigint, sequence: number): bigint;
 
 export function packZoneDefinition(card_type: number): number;
-
-/**
- * Player-scope analog of [`blueprint_by_id`].
- */
-export function playerBlueprintById(id: number): any;
-
-/**
- * Player-scope analog of [`blueprint_by_key`].
- */
-export function playerBlueprintByKey(key: string): any;
 
 export function pocketDimensionLayer(): number;
 
@@ -262,32 +246,9 @@ export function recipeByKey(key: string): any;
  */
 export function recipesAll(): any;
 
-/**
- * Stable blueprint ids granted to a player on creating a character
- * of the given soul. Sourced from the soul's `"blueprints"` array in
- * `starter_packs/data/*.json`. Returns an empty array for souls that
- * don't declare any. Throws on registry-build failure.
- *
- * Each id resolves to a full `Blueprint` via `blueprintById`.
- */
-export function starterBlueprintsForSoul(soul: string): Uint16Array;
-
-/**
- * All starter packs registered for a given soul card key (e.g.
- * `"human"`). Returns an array of `StarterPack` objects (`id`,
- * `soul`, `packId`, `contents: [{cardKey, packedDefinition,
- * count}]`). Empty array for unknown soul keys. Throws on
- * registry-build failure.
- *
- * Used by the character-create panel to enumerate which packs the
- * player can pick from. JS-side filtering by soul is unnecessary
- * since this is already soul-scoped at the call site.
- */
-export function starterPacksForSoul(soul: string): any;
-
 export function unpackDefinition(v: number): any;
 
-export function unpackMacroZone(v: number): any;
+export function unpackMacroZone(v: bigint): any;
 
 export function unpackMicroZone(v: number): any;
 
@@ -304,7 +265,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly allBlueprints: () => [number, number, number];
-    readonly allPlayerBlueprints: () => [number, number, number];
     readonly allTextures: () => [number, number, number];
     readonly aspectIdByName: (a: number, b: number) => [number, number, number];
     readonly aspectInfo: (a: number) => [number, number, number];
@@ -327,22 +287,18 @@ export interface InitOutput {
     readonly isStackLayout: (a: number, b: number) => number;
     readonly miniZoneLayer: () => number;
     readonly packDefinition: (a: number, b: number) => number;
-    readonly packMacroZone: (a: number, b: number) => number;
+    readonly packMacroZone: (a: number, b: number) => bigint;
     readonly packMicroZone: (a: number, b: number, c: number) => number;
     readonly packSlotMicroZone: (a: number) => number;
     readonly packStackMicroZone: (a: number, b: number, c: number) => number;
     readonly packValidAt: (a: bigint, b: number) => bigint;
     readonly packZoneDefinition: (a: number) => number;
-    readonly playerBlueprintById: (a: number) => [number, number, number];
-    readonly playerBlueprintByKey: (a: number, b: number) => [number, number, number];
     readonly pocketDimensionLayer: () => number;
     readonly recipeById: (a: number) => [number, number, number];
     readonly recipeByKey: (a: number, b: number) => [number, number, number];
     readonly recipesAll: () => [number, number, number];
-    readonly starterBlueprintsForSoul: (a: number, b: number) => [number, number, number, number];
-    readonly starterPacksForSoul: (a: number, b: number) => [number, number, number];
     readonly unpackDefinition: (a: number) => [number, number, number];
-    readonly unpackMacroZone: (a: number) => [number, number, number];
+    readonly unpackMacroZone: (a: bigint) => [number, number, number];
     readonly unpackMicroZone: (a: number) => [number, number, number];
     readonly unpackStackMicroZone: (a: number) => [number, number, number];
     readonly unpackZoneDefinition: (a: number) => number;

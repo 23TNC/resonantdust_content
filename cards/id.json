@@ -21,9 +21,6 @@
     "anima-": 11,
     "anima+": 12
   },
-  "player_blueprint": {
-    "player_blueprint_soul_slot": 1
-  },
   "requisite": {
     "axe": 1,
     "pickaxe": 2,
@@ -43,7 +40,8 @@
   },
   "soul": {
     "human": 1,
-    "human_builder": 2
+    "human_builder": 2,
+    "player_soul": 3
   },
   "tile": {
     "building_nd_furnace": 1,

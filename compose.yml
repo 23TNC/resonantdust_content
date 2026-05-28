@@ -39,7 +39,7 @@ services:
     working_dir: /workspace/content
     environment:
       PATH: /workspace/content/target/wasm-tools/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      WASM_BINDGEN_VERSION: "0.2.121"
+      WASM_BINDGEN_VERSION: "0.2.122"
     entrypoint: ["bash", "-euo", "pipefail", "-c"]
     command:
       - |
