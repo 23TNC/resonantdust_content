@@ -14,98 +14,65 @@
 //                          `surface` is bits 24-31. The payload is always two
 //                          signed 12-bit coords (q at 12-23, r at 0-11), read
 //                          as (q,r) or (x,y) per surface.
-//   micro_zone       u8  — TWO INTERPRETATIONS, gated by (stacked_state, surface):
-//     stack layout — state == OnRoot AND surface < WORLD_LAYER:
-//                   u8 = [position: u4 | direction: u2 | stacked_state: u2]
-//                   direction: 0 = up / top, 1 = down / bottom, 2 = hex.
-//     legacy layout — Free state (and any reserved/state-3 rows):
-//                   u8 = [q: u3 | r: u3 | stacked_state: u2]
-//   micro_location   u32 — interpretation depends on stacked_state:
-//     Free          → [x: i16 | y: i16] (loose XY in surface-local coords)
-//     Slot          → immediate parent's card_id (chain walks up via this).
-//     OnRoot        → ROOT card_id of the chain (chain order / direction
-//                     from `micro_zone.position` and `micro_zone.direction`).
+//   micro_location   u32 — TWO INTERPRETATIONS, gated by the `micro_is_card`
+//     flag (in flags_bk):
+//     micro_is_card set   → root card_id. The card is a stack member; its
+//                           branch is the `stack_state` flag, its slot is the
+//                           `stack_index` flag. Flat chains — root, never parent.
+//     micro_is_card clear → loose coords + offset:
+//                   u32 = [local_q: u3 | local_r: u3 | x: i12 | y: i12 | rsvd: u2]
+//                           local_q/local_r address a cell in the zone; x/y is
+//                           the signed offset within that cell.
+//   (micro_zone u8 was REMOVED — everything it held now lives in micro_location
+//    + flags.)
 //   packed_def       u16 = [card_type: u4 | def_id: u12]
 //   zone_def         u8  = [card_type: u4 | 0: u4] (lower nibble reserved)
 //   tile slot        u16 = [def_id: u12 | stock0: u2 | stock1: u2]
 //                          packed 4-per-u64 across 16 u64s per zone — see
 //                          docs/TILE_ASPECTS.md.
 //
-// Unified card model: every card is a card. The branching off a root
-// is purely directional — `direction = 0/1/2` selects which side of
-// the root (top / bottom / hex) the child chains onto. The card's
-// `card_type` only drives shape rendering, not structural logic. No
-// special "hex-anchored" state exists anymore — value 3 (formerly
-// `OnHex`) was reserved when that model retired and has since been
-// repurposed as `Deferred` for state-3 deferred placement (see the
-// variant doc on `StackedState::Deferred`).
-//
-// The "server is forcing this position" signal moved out of micro_zone
-// (it used to live in bit 2 alongside position/state) and now lives in
-// `flags` as the `pos_need` (required) / `pos_want` (advisory) bit
-// pair — see `cards/flags.json`.
+// Unified card model: every card is a card. A chain is one root
+// (micro_is_card clear, loose/snapped) plus N members (micro_is_card set,
+// micro_location == root). The branch is the `stack_state` flag, gated on
+// micro_is_card:
+//   micro_is_card set:   0 = hex, 1 = top, 2 = bottom, 3 = deferred.
+//   micro_is_card clear: 0 = loose-hex, 1 = loose-rect, 2 = snap-hex, 3 = snap-rect.
+// `stack_index` (flag) gives the slot within a branch (0..15). stack_state,
+// stack_index, and micro_is_card all live in flags_bk so they propagate in
+// lockstep with micro_location (which the flags_state bit-diff propagator would
+// not). The "server forcing this position" signal lives in flags as the
+// `pos_need` (required) / `pos_want` (advisory) pair — see `cards/flags.json`.
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StackedState {
-    /// Loose. `micro_location` is encoded `(x, y)`; `micro_zone` upper
-    /// 6 bits are the legacy `(q, r)`. Roots of in-flight chains and
-    /// every world-surface card use this state.
-    Free = 0,
-    /// Parent-pointer slot. `micro_location` holds the **immediate
-    /// parent's** card_id (which can itself be `Slot`, `OnRoot`, or
-    /// `Free`). The slot's direction (bits 2-3 of `micro_zone`) is
-    /// stored explicitly even though it could be derived from the
-    /// parent — saves a chain walk on every render / parent-resolve.
-    /// Position from root is implicit: walk `micro_location` up until
-    /// you hit a state that's not `Slot` (that'll be `OnRoot` or
-    /// `Free`). Used by `propose_action` to stitch slots above the
-    /// root in any of the three branches.
-    Slot = 1,
-    /// Stacked on a chain root — `micro_location` is the **root**
-    /// card_id (not the immediate parent). Chain order comes from
-    /// `micro_zone.position`; chain branch (top / bottom / hex) comes
-    /// from `micro_zone.direction`.
-    OnRoot = 2,
-    /// **Deferred placement, anchored to host.** `micro_location` is
-    /// the host card_id (or 0 if no host); `micro_zone` upper 6 bits
-    /// carry a fallback `(q, r)` in the legacy layout. Resolution
-    /// runs client-side at mirror time (`CardManager.appendAtChainLeaf`):
-    /// walk host's chain to its root, pick the chain's growth
-    /// direction, append new leaf in that direction; on any tier
-    /// rejection (host gone, type-incompatible, drop-locked) fall
-    /// through to (q, r) loose → owner inventory → free (q, r) in
-    /// macroZone → worst-case loose at (q, r).
-    ///
-    /// Server-side: the follower index in `cards::state_3_followers`
-    /// keeps every deferred row's `(surface, macro_zone)` in lockstep
-    /// with its host so subscription gaps don't strand cards on the
-    /// wrong zone. Host destruction clears `micro_location = 0`;
-    /// client cascade then falls through to the (q, r) tier.
-    ///
-    /// Pre-unified-card-model this value was `OnHex` (hex cards were
-    /// their own state); retired and reserved, freeing the value for
-    /// this repurposing. Recipe outputs like `stack.N.create: <key>`
-    /// emit this state so the placement doesn't go stale between
-    /// propose and commit.
-    Deferred = 3,
-}
+// `stack_state` is a 2-bit field in `flags_bk` (not an enum on micro_zone any
+// more). Its meaning is gated on the `micro_is_card` flag:
+//   micro_is_card set   (stacked):  0 hex | 1 top | 2 bottom | 3 deferred
+//   micro_is_card clear (loose):    0 loose-hex | 1 loose-rect | 2 snap-hex | 3 snap-rect
+// The stacked-branch values reuse the STACK_DIR_* constants below. The flag
+// masks/shifts are resolved through `flags::bk_flags()` (server) and the client
+// mirror — packed.rs only owns the `micro_location` bit layout.
 
-impl StackedState {
-    /// Decode a 2-bit state value. All four values are now defined —
-    /// `Deferred` repurposes the previously-reserved value 3.
-    pub fn from_u2(v: u8) -> Self {
-        match v & 0b11 {
-            0 => Self::Free,
-            1 => Self::Slot,
-            2 => Self::OnRoot,
-            3 => Self::Deferred,
-            _ => unreachable!(),
-        }
-    }
+/// `stack_state` value for the deferred branch (only meaningful when
+/// `micro_is_card` is set). Resolution runs at mirror time on the client;
+/// server-side the deferred follower index keeps `(surface, macro_zone)` in
+/// lockstep with the host and clears the anchor on host death.
+pub const STACK_STATE_DEFERRED: u8 = 3;
 
-    pub fn to_u2(self) -> u8 {
-        self as u8
+/// `stack_state` values for the loose branch (only meaningful when
+/// `micro_is_card` is clear). Snap variants center on a cell and are the
+/// exclusive (one-per-cell) occupant; loose variants carry an x/y offset.
+pub const LOOSE_HEX: u8 = 0;
+pub const LOOSE_RECT: u8 = 1;
+pub const SNAP_HEX: u8 = 2;
+pub const SNAP_RECT: u8 = 3;
+
+/// Default loose `kind` for a card placed loose on `surface`: hex-grid surfaces
+/// (world, mini-zone) use `LOOSE_HEX`; container surfaces (inventory, pocket
+/// dimension, player inventory) use `LOOSE_RECT`.
+pub fn loose_kind_for_surface(surface: u8) -> u8 {
+    if surface >= WORLD_LAYER || surface == MINI_ZONE_LAYER {
+        LOOSE_HEX
+    } else {
+        LOOSE_RECT
     }
 }
 
@@ -178,6 +145,38 @@ pub fn pack_valid_at(time_ms: u64, sequence: u16) -> u64 {
 
 pub fn valid_at_time(v: u64) -> u64 {
     v >> 16
+}
+
+// ---- card_id -----------------------------------------------------------
+//
+// A `card_id` is a u32 partitioned `[ data_shard:u12 (31-20) | local:u20 (19-0) ]`.
+// The high 12 bits name the `cards` shard that owns the card (0..4095); the low
+// 20 bits are a per-shard local counter (0..1_048_575, locals 0..1023 reserved —
+// see `cards::FIRST_CARD_ID`). The gateway routes a card to its `cards` database
+// purely by `card_shard_of(id)` — no index lookup. A card row's `data_shard`
+// column always equals `card_shard_of(card_id)`.
+
+/// Width of the per-shard local-id field within a `card_id`.
+pub const CARD_LOCAL_BITS: u32 = 20;
+/// Mask selecting the local-id field (low 20 bits).
+pub const CARD_LOCAL_MASK: u32 = (1 << CARD_LOCAL_BITS) - 1;
+/// Largest `data_shard` a `card_id` can name (the 12-bit high field).
+pub const CARD_SHARD_MAX: u16 = ((1u32 << (32 - CARD_LOCAL_BITS)) - 1) as u16;
+
+/// The `cards` shard that owns `card_id` (high 12 bits).
+pub fn card_shard_of(card_id: u32) -> u16 {
+    (card_id >> CARD_LOCAL_BITS) as u16
+}
+
+/// The per-shard local id of `card_id` (low 20 bits).
+pub fn card_local_of(card_id: u32) -> u32 {
+    card_id & CARD_LOCAL_MASK
+}
+
+/// Build a `card_id` from a shard id and a per-shard local id. `shard` is
+/// masked to 12 bits, `local` to 20.
+pub fn pack_card_id(shard: u16, local: u32) -> u32 {
+    (((shard as u32) & (CARD_SHARD_MAX as u32)) << CARD_LOCAL_BITS) | (local & CARD_LOCAL_MASK)
 }
 
 // ---- macro_zone --------------------------------------------------------
@@ -254,122 +253,112 @@ pub fn pack_macro_zone_full(owner: u32, surface: u8, q: i16, r: i16) -> u64 {
     with_owner(with_surface(pack_macro_zone(q, r), surface), owner)
 }
 
-// ---- micro_zone --------------------------------------------------------
+// ---- macro_region ------------------------------------------------------
+//
+// A `Region` covers a `REGION_SIZE × REGION_SIZE` block of zones (8×8 = 64),
+// tracking per-zone spawn presence/availability as two u64 bitfields. Its
+// `macro_region` key is bit-identical to `macro_zone` — same `[card_id:u32 |
+// surface:u8 | region_q:i12 | region_r:i12]` layout — only the coordinate
+// scale differs (region units, where 1 region = 8 zones). So it reuses the
+// `macro_zone` combiners verbatim.
 
-pub fn pack_micro_zone(q: u8, r: u8, state: StackedState) -> u8 {
-    ((q & 0b111) << 5) | ((r & 0b111) << 2) | state.to_u2()
+/// Zones per region edge (region is `REGION_SIZE × REGION_SIZE` zones).
+pub const REGION_SIZE: i16 = 8;
+
+/// Build a `macro_region` from its fields. Same layout as `macro_zone`;
+/// `(region_q, region_r)` are in region units. World uses `card_id = 0`.
+pub fn pack_macro_region(card_id: u32, surface: u8, region_q: i16, region_r: i16) -> u64 {
+    pack_macro_zone_full(card_id, surface, region_q, region_r)
 }
 
-pub fn unpack_micro_zone(v: u8) -> (u8, u8, StackedState) {
-    (
-        (v >> 5) & 0b111,
-        (v >> 2) & 0b111,
-        StackedState::from_u2(v),
-    )
+/// Map a `macro_zone` to its containing `(macro_region, bit)`, where `bit`
+/// (`0..63`) indexes the zone's slot inside the region's 64-bit
+/// presence/availability fields. Bit layout is row-major over the region's
+/// 8×8 zones: `bit = local_r * REGION_SIZE + local_q`, so bit `i` ↔ the zone
+/// at `(region_q*8 + i % 8, region_r*8 + i / 8)`. `card_id` and `surface` are
+/// carried through unchanged, so a non-world zone maps to its own owner's /
+/// surface's region.
+pub fn region_of_zone(macro_zone: u64) -> (u64, u8) {
+    let (zq, zr) = unpack_macro_zone(macro_zone);
+    let card_id = owner_of(macro_zone);
+    let surface = surface_of(macro_zone);
+    // Euclidean div/rem so negative coords floor toward -inf and locals stay 0..7.
+    let region_q = zq.div_euclid(REGION_SIZE);
+    let region_r = zr.div_euclid(REGION_SIZE);
+    let local_q = zq.rem_euclid(REGION_SIZE);
+    let local_r = zr.rem_euclid(REGION_SIZE);
+    let bit = (local_r * REGION_SIZE + local_q) as u8;
+    (pack_macro_region(card_id, surface, region_q, region_r), bit)
 }
 
-pub fn micro_zone_state(v: u8) -> StackedState {
-    StackedState::from_u2(v)
-}
-
-/// Whether the **stack layout** applies to this `(state, surface)` pair.
-/// True when the card is stacked on inventory (state == OnRoot AND
-/// surface < WORLD_LAYER). False for Free, Slot, and world surfaces —
-/// Free keeps the legacy `(q, r)` layout; Slot reads through
-/// [`unpack_stack_micro_zone`] for the direction bits but doesn't go
-/// through the mirror's preserve gate.
-pub fn is_stack_layout(state: StackedState, surface: u8) -> bool {
-    surface < WORLD_LAYER && matches!(state, StackedState::OnRoot)
-}
-
-/// Direction values within the stack layout. Two bits — values 0, 1,
-/// 2 are valid; value 3 is reserved.
-///
-/// The values match the recipe-grammar **branch number** convention
-/// from `recipe_tape.rs`: a card placed in `slot.<N>.<index>` of its
-/// chain root is packed with direction byte `N`.
-///
-/// - `0` = `STACK_DIR_HEX` — the tile branch (visually beneath root;
-///   `slot.0.X` in recipe grammar).
-/// - `1` = `STACK_DIR_UP` — top branch (`slot.1.X`).
-/// - `2` = `STACK_DIR_DOWN` — bottom branch (`slot.2.X`).
-///
-/// The three branches are structurally identical (parent-pointer chain
-/// in `Slot` state, root-anchored chain in `OnRoot` state). The
-/// direction value only tells client renderers which side of root to
-/// visually attach the chain to.
+// ---- stack branch directions -------------------------------------------
+//
+// `stack_state` values for the stacked branch (micro_is_card set). They match
+// the recipe-grammar **branch number** convention from `recipe_tape.rs`: a card
+// placed in `slot.<N>.<index>` of its chain root carries `stack_state == N`.
+//
+// - `0` = `STACK_DIR_HEX` — the tile branch (visually beneath root; `slot.0.X`).
+// - `1` = `STACK_DIR_UP` — top branch (`slot.1.X`).
+// - `2` = `STACK_DIR_DOWN` — bottom branch (`slot.2.X`).
+//
+// The branches are structurally identical (flat root + index chains). The value
+// only tells renderers which side of root to attach the chain to. Value 3 in
+// the stacked branch is `STACK_STATE_DEFERRED`.
 pub const STACK_DIR_HEX: u8 = 0;
 pub const STACK_DIR_UP: u8 = 1;
 pub const STACK_DIR_DOWN: u8 = 2;
 
-/// Pack `(position, direction, state)` under the stack layout:
-/// `[position: u4 | direction: u2 | stacked_state: u2]`.
-///
-/// `position` is the card's index in its chain from the root (1..=15;
-/// 0 reserved for "no chain"). Saturates at `0b1111` if higher — chains
-/// deeper than 15 cards are rejected at propose-time by `actions.rs`.
-/// `direction` is one of [`STACK_DIR_UP`] / [`STACK_DIR_DOWN`] /
-/// [`STACK_DIR_HEX`]; value 3 is reserved.
-///
-/// The "server is forcing this position" signal moved out of micro_zone
-/// (it used to share bits with state/direction) and lives in `flags`
-/// as the `pos_need` (required) / `pos_want` (advisory) bit pair.
-///
-/// **Only valid for `state == OnRoot`.** Free cards use
-/// [`pack_micro_zone`]; Slot cards use [`pack_slot_micro_zone`].
-pub fn pack_stack_micro_zone(position: u8, direction: u8, state: StackedState) -> u8 {
-    debug_assert!(
-        matches!(state, StackedState::OnRoot),
-        "pack_stack_micro_zone only valid for OnRoot; got {state:?}",
-    );
-    let pos = position & 0b1111;
-    let dir = direction & 0b11;
-    (pos << 4) | (dir << 2) | state.to_u2()
-}
-
-/// Inverse of [`pack_stack_micro_zone`]. Returns `(position, direction, state)`.
-/// The caller is responsible for knowing the byte was packed under the stack
-/// layout; reading a legacy-layout byte through here gives nonsense for the
-/// `position` and `direction` fields.
-pub fn unpack_stack_micro_zone(v: u8) -> (u8, u8, StackedState) {
-    let position = (v >> 4) & 0b1111;
-    let direction = (v >> 2) & 0b11;
-    (position, direction, StackedState::from_u2(v))
-}
-
-/// Read just the `position` field under the stack layout. Returns 0-15.
-pub fn micro_zone_position(v: u8) -> u8 {
-    (v >> 4) & 0b1111
-}
-
-/// Read just the `direction` field under the stack layout. Returns
-/// 0-3; values 0/1/2 are [`STACK_DIR_UP`] / [`STACK_DIR_DOWN`] /
-/// [`STACK_DIR_HEX`]. Value 3 is reserved.
-pub fn micro_zone_direction(v: u8) -> u8 {
-    (v >> 2) & 0b11
-}
-
-/// Pack a `micro_zone` byte for a `Slot` (parent-pointer mode).
-/// Layout matches the stack layout
-/// (`[position:4 | direction:2 | state:2]`) with `position = 0` since
-/// position from root is implicit (walk parent pointers via
-/// `micro_location`). Direction is stored explicitly so render /
-/// parent-resolve don't have to climb the chain to derive it.
-pub fn pack_slot_micro_zone(direction: u8) -> u8 {
-    let dir = direction & 0b11;
-    (dir << 2) | StackedState::Slot.to_u2()
-}
-
 // ---- micro_location ----------------------------------------------------
+//
+// When `micro_is_card` is CLEAR, `micro_location` is loose coords + offset:
+//   [ local_q:u3 (29-31) | local_r:u3 (26-28) | x:i12 (14-25) | y:i12 (2-13) | rsvd:u2 (0-1) ]
+// When `micro_is_card` is SET, `micro_location` is the root card_id (identity).
 
-pub fn pack_micro_location_xy(x: i16, y: i16) -> u32 {
-    ((x as u16 as u32) << 16) | (y as u16 as u32)
+const MICRO_LOOSE_X_SHIFT: u32 = 14;
+const MICRO_LOOSE_Y_SHIFT: u32 = 2;
+const MICRO_LOOSE_LQ_SHIFT: u32 = 29;
+const MICRO_LOOSE_LR_SHIFT: u32 = 26;
+
+/// Sign-extend the 12-bit field at `shift` of `v` (a u32) into an `i16`.
+fn micro_coord(v: u32, shift: u32) -> i16 {
+    let s = ((v >> shift) & 0xFFF) as i16;
+    if s & 0x800 != 0 { s - 0x1000 } else { s }
 }
 
-pub fn unpack_micro_location_xy(v: u32) -> (i16, i16) {
-    ((v >> 16) as u16 as i16, v as u16 as i16)
+/// Pack loose coords + within-cell offset. `local_q`/`local_r` are the 0..7
+/// cell address inside the zone; `x`/`y` are the signed offset within the cell
+/// (±2047). Used when `micro_is_card` is clear.
+pub fn pack_micro_loose(local_q: u8, local_r: u8, x: i16, y: i16) -> u32 {
+    (((local_q & 0b111) as u32) << MICRO_LOOSE_LQ_SHIFT)
+        | (((local_r & 0b111) as u32) << MICRO_LOOSE_LR_SHIFT)
+        | (((x as u16 as u32) & 0xFFF) << MICRO_LOOSE_X_SHIFT)
+        | (((y as u16 as u32) & 0xFFF) << MICRO_LOOSE_Y_SHIFT)
 }
 
+/// Inverse of [`pack_micro_loose`]. Returns `(local_q, local_r, x, y)`.
+pub fn unpack_micro_loose(v: u32) -> (u8, u8, i16, i16) {
+    (
+        ((v >> MICRO_LOOSE_LQ_SHIFT) & 0b111) as u8,
+        ((v >> MICRO_LOOSE_LR_SHIFT) & 0b111) as u8,
+        micro_coord(v, MICRO_LOOSE_X_SHIFT),
+        micro_coord(v, MICRO_LOOSE_Y_SHIFT),
+    )
+}
+
+/// Read just the cell address `(local_q, local_r)` from a loose `micro_location`.
+pub fn micro_loose_cell(v: u32) -> (u8, u8) {
+    (
+        ((v >> MICRO_LOOSE_LQ_SHIFT) & 0b111) as u8,
+        ((v >> MICRO_LOOSE_LR_SHIFT) & 0b111) as u8,
+    )
+}
+
+/// Build a snapped (centered) loose `micro_location` — cell with zero offset.
+pub fn pack_micro_snap(local_q: u8, local_r: u8) -> u32 {
+    pack_micro_loose(local_q, local_r, 0, 0)
+}
+
+/// `micro_location` as a root card_id (identity; used when `micro_is_card` set).
 pub fn pack_micro_location_card_id(card_id: u32) -> u32 {
     card_id
 }
@@ -678,60 +667,58 @@ mod tests {
     }
 
     #[test]
-    fn micro_zone_roundtrip() {
-        let v = pack_micro_zone(5, 3, StackedState::Free);
-        assert_eq!(unpack_micro_zone(v), (5, 3, StackedState::Free));
+    fn region_of_zone_origin_block() {
+        // The origin 8×8 block (world chunks q,r ∈ 0..7) all maps to region
+        // (0,0); corners hit bit 0 and bit 63.
+        let region00 = pack_macro_region(0, WORLD_LAYER, 0, 0);
+        let (mr, bit) = region_of_zone(pack_macro_zone_full(0, WORLD_LAYER, 0, 0));
+        assert_eq!(mr, region00);
+        assert_eq!(bit, 0);
+        let (mr, bit) = region_of_zone(pack_macro_zone_full(0, WORLD_LAYER, 7, 7));
+        assert_eq!(mr, region00);
+        assert_eq!(bit, 63);
+        // Row-major: (local_q=3, local_r=1) → bit 1*8 + 3 = 11.
+        let (mr, bit) = region_of_zone(pack_macro_zone_full(0, WORLD_LAYER, 3, 1));
+        assert_eq!(mr, region00);
+        assert_eq!(bit, 11);
     }
 
     #[test]
-    fn stack_micro_zone_roundtrip() {
-        for dir in [STACK_DIR_UP, STACK_DIR_DOWN, STACK_DIR_HEX] {
-            let v = pack_stack_micro_zone(7, dir, StackedState::OnRoot);
-            assert_eq!(unpack_stack_micro_zone(v), (7, dir, StackedState::OnRoot));
-            let v = pack_stack_micro_zone(15, dir, StackedState::OnRoot);
-            assert_eq!(unpack_stack_micro_zone(v), (15, dir, StackedState::OnRoot));
+    fn region_of_zone_boundary_and_negative() {
+        // zq=8 crosses into region (1,0), local bit 0.
+        let (mr, bit) = region_of_zone(pack_macro_zone_full(0, WORLD_LAYER, 8, 0));
+        assert_eq!(mr, pack_macro_region(0, WORLD_LAYER, 1, 0));
+        assert_eq!(bit, 0);
+        // Negative coords floor toward -inf: zq=-1 → region (-1), local 7.
+        let (mr, bit) = region_of_zone(pack_macro_zone_full(0, WORLD_LAYER, -1, -1));
+        assert_eq!(mr, pack_macro_region(0, WORLD_LAYER, -1, -1));
+        assert_eq!(bit, 7 * REGION_SIZE as u8 + 7); // (local_q=7, local_r=7) → 63
+        // card_id + surface carry through to the region key.
+        let (mr, _) = region_of_zone(pack_macro_zone_full(1024, MINI_ZONE_LAYER, 9, 2));
+        assert_eq!(mr, pack_macro_region(1024, MINI_ZONE_LAYER, 1, 0));
+    }
+
+    #[test]
+    fn micro_loose_roundtrip() {
+        // Full field exercise: cell 0..7 each, signed offsets.
+        for lq in 0u8..8 {
+            for lr in 0u8..8 {
+                let v = pack_micro_loose(lq, lr, -100, 200);
+                assert_eq!(unpack_micro_loose(v), (lq, lr, -100, 200));
+                assert_eq!(micro_loose_cell(v), (lq, lr));
+            }
         }
-        // position saturates at 4 bits.
-        let v = pack_stack_micro_zone(0xFF, STACK_DIR_UP, StackedState::OnRoot);
-        assert_eq!(micro_zone_position(v), 15);
-        assert_eq!(micro_zone_direction(v), STACK_DIR_UP);
-        assert_eq!(micro_zone_state(v), StackedState::OnRoot);
+        // Signed-offset extremes (i12 range ±2047).
+        let v = pack_micro_loose(5, 3, 2047, -2048);
+        assert_eq!(unpack_micro_loose(v), (5, 3, 2047, -2048));
+        // Snap = zero offset.
+        let v = pack_micro_snap(6, 1);
+        assert_eq!(unpack_micro_loose(v), (6, 1, 0, 0));
     }
 
     #[test]
-    fn stack_layout_gate() {
-        assert!(is_stack_layout(StackedState::OnRoot, 1));
-        assert!(!is_stack_layout(StackedState::Free, 1));
-        // `Slot` rows are server-authoritative — even though their byte
-        // layout matches the stack layout, the mirror's preserve gate
-        // doesn't fire for them, so `is_stack_layout` returns false.
-        assert!(!is_stack_layout(StackedState::Slot, 1));
-        // World surfaces (>= 64) keep legacy layout regardless of state.
-        assert!(!is_stack_layout(StackedState::OnRoot, 64));
-        assert!(!is_stack_layout(StackedState::OnRoot, 200));
-    }
-
-    #[test]
-    fn slot_micro_zone_roundtrip() {
-        for dir in [STACK_DIR_UP, STACK_DIR_DOWN, STACK_DIR_HEX] {
-            let v = pack_slot_micro_zone(dir);
-            assert_eq!(micro_zone_state(v), StackedState::Slot);
-            assert_eq!(micro_zone_direction(v), dir);
-            assert_eq!(micro_zone_position(v), 0);
-        }
-    }
-
-    #[test]
-    fn from_u2_decodes_deferred() {
-        // Value 3 is no longer reserved — it decodes to `Deferred`
-        // (the repurposed slot, formerly the panicking `OnHex`).
-        assert_eq!(StackedState::from_u2(3), StackedState::Deferred);
-    }
-
-    #[test]
-    fn micro_location_xy_signed() {
-        let v = pack_micro_location_xy(-100, 200);
-        assert_eq!(unpack_micro_location_xy(v), (-100, 200));
+    fn micro_location_card_id_identity() {
+        assert_eq!(unpack_micro_location_card_id(pack_micro_location_card_id(4242)), 4242);
     }
 
     #[test]
@@ -846,6 +833,28 @@ mod tests {
         }
         // tile 5 retained its def + slot 1 stock.
         assert_eq!(tile_full(&packed, 5), (0xABC, 0, 1));
+    }
+
+    #[test]
+    fn card_id_shard_roundtrip() {
+        // shard in the high 12 bits, local in the low 20.
+        let id = pack_card_id(0, 1024);
+        assert_eq!(card_shard_of(id), 0);
+        assert_eq!(card_local_of(id), 1024);
+
+        let id = pack_card_id(7, 1_048_575);
+        assert_eq!(card_shard_of(id), 7);
+        assert_eq!(card_local_of(id), 1_048_575);
+
+        // Max shard, and field masking.
+        let id = pack_card_id(CARD_SHARD_MAX, CARD_LOCAL_MASK);
+        assert_eq!(id, u32::MAX);
+        assert_eq!(card_shard_of(id), CARD_SHARD_MAX);
+        assert_eq!(CARD_SHARD_MAX, 4095);
+
+        // The WORLD sentinel (0) decodes to shard 0, local 0.
+        assert_eq!(card_shard_of(0), 0);
+        assert_eq!(card_local_of(0), 0);
     }
 
     #[test]

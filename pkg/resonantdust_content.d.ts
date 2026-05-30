@@ -185,19 +185,15 @@ export function inventoryLayer(): number;
  */
 export function isHexType(type_id: number): boolean;
 
-export function isStackLayout(stacked_state: number, surface: number): boolean;
-
 export function miniZoneLayer(): number;
 
 export function packDefinition(card_type: number, def_id: number): number;
 
 export function packMacroZone(q: number, r: number): bigint;
 
-export function packMicroZone(q: number, r: number, stacked_state: number): number;
+export function packMicroLoose(local_q: number, local_r: number, x: number, y: number): number;
 
-export function packSlotMicroZone(direction: number): number;
-
-export function packStackMicroZone(position: number, direction: number, stacked_state: number): number;
+export function packMicroSnap(local_q: number, local_r: number): number;
 
 export function packValidAt(time_ms: bigint, sequence: number): bigint;
 
@@ -250,9 +246,7 @@ export function unpackDefinition(v: number): any;
 
 export function unpackMacroZone(v: bigint): any;
 
-export function unpackMicroZone(v: number): any;
-
-export function unpackStackMicroZone(v: number): any;
+export function unpackMicroLoose(v: number): any;
 
 export function unpackZoneDefinition(v: number): number;
 
@@ -284,13 +278,11 @@ export interface InitOutput {
     readonly hasCardFlag: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly inventoryLayer: () => number;
     readonly isHexType: (a: number) => [number, number, number];
-    readonly isStackLayout: (a: number, b: number) => number;
     readonly miniZoneLayer: () => number;
     readonly packDefinition: (a: number, b: number) => number;
     readonly packMacroZone: (a: number, b: number) => bigint;
-    readonly packMicroZone: (a: number, b: number, c: number) => number;
-    readonly packSlotMicroZone: (a: number) => number;
-    readonly packStackMicroZone: (a: number, b: number, c: number) => number;
+    readonly packMicroLoose: (a: number, b: number, c: number, d: number) => number;
+    readonly packMicroSnap: (a: number, b: number) => number;
     readonly packValidAt: (a: bigint, b: number) => bigint;
     readonly packZoneDefinition: (a: number) => number;
     readonly pocketDimensionLayer: () => number;
@@ -299,8 +291,7 @@ export interface InitOutput {
     readonly recipesAll: () => [number, number, number];
     readonly unpackDefinition: (a: number) => [number, number, number];
     readonly unpackMacroZone: (a: bigint) => [number, number, number];
-    readonly unpackMicroZone: (a: number) => [number, number, number];
-    readonly unpackStackMicroZone: (a: number) => [number, number, number];
+    readonly unpackMicroLoose: (a: number) => [number, number, number];
     readonly unpackZoneDefinition: (a: number) => number;
     readonly validAtTime: (a: bigint) => bigint;
     readonly worldLayer: () => number;

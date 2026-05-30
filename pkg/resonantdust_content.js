@@ -394,16 +394,6 @@ export function isHexType(type_id) {
 }
 
 /**
- * @param {number} stacked_state
- * @param {number} surface
- * @returns {boolean}
- */
-export function isStackLayout(stacked_state, surface) {
-    const ret = wasm.isStackLayout(stacked_state, surface);
-    return ret !== 0;
-}
-
-/**
  * @returns {number}
  */
 export function miniZoneLayer() {
@@ -432,34 +422,25 @@ export function packMacroZone(q, r) {
 }
 
 /**
- * @param {number} q
- * @param {number} r
- * @param {number} stacked_state
+ * @param {number} local_q
+ * @param {number} local_r
+ * @param {number} x
+ * @param {number} y
  * @returns {number}
  */
-export function packMicroZone(q, r, stacked_state) {
-    const ret = wasm.packMicroZone(q, r, stacked_state);
-    return ret;
+export function packMicroLoose(local_q, local_r, x, y) {
+    const ret = wasm.packMicroLoose(local_q, local_r, x, y);
+    return ret >>> 0;
 }
 
 /**
- * @param {number} direction
+ * @param {number} local_q
+ * @param {number} local_r
  * @returns {number}
  */
-export function packSlotMicroZone(direction) {
-    const ret = wasm.packSlotMicroZone(direction);
-    return ret;
-}
-
-/**
- * @param {number} position
- * @param {number} direction
- * @param {number} stacked_state
- * @returns {number}
- */
-export function packStackMicroZone(position, direction, stacked_state) {
-    const ret = wasm.packStackMicroZone(position, direction, stacked_state);
-    return ret;
+export function packMicroSnap(local_q, local_r) {
+    const ret = wasm.packMicroSnap(local_q, local_r);
+    return ret >>> 0;
 }
 
 /**
@@ -583,20 +564,8 @@ export function unpackMacroZone(v) {
  * @param {number} v
  * @returns {any}
  */
-export function unpackMicroZone(v) {
-    const ret = wasm.unpackMicroZone(v);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return takeFromExternrefTable0(ret[0]);
-}
-
-/**
- * @param {number} v
- * @returns {any}
- */
-export function unpackStackMicroZone(v) {
-    const ret = wasm.unpackStackMicroZone(v);
+export function unpackMicroLoose(v) {
+    const ret = wasm.unpackMicroLoose(v);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

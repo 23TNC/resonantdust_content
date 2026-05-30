@@ -426,69 +426,35 @@ pub fn unpack_macro_zone(v: u64) -> Result<JsValue, JsValue> {
     .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-#[wasm_bindgen(js_name = packMicroZone)]
-pub fn pack_micro_zone(q: u8, r: u8, stacked_state: u8) -> u8 {
-  core_packed::pack_micro_zone(q, r, core_packed::StackedState::from_u2(stacked_state))
+#[wasm_bindgen(js_name = packMicroLoose)]
+pub fn pack_micro_loose(local_q: u8, local_r: u8, x: i16, y: i16) -> u32 {
+  core_packed::pack_micro_loose(local_q, local_r, x, y)
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MicroZoneUnpacked {
-  q: u8,
-  r: u8,
-  stacked_state: u8,
+struct MicroLooseUnpacked {
+  local_q: u8,
+  local_r: u8,
+  x: i16,
+  y: i16,
 }
 
-#[wasm_bindgen(js_name = unpackMicroZone)]
-pub fn unpack_micro_zone(v: u8) -> Result<JsValue, JsValue> {
-  let (q, r, state) = core_packed::unpack_micro_zone(v);
-  serde_wasm_bindgen::to_value(&MicroZoneUnpacked {
-    q,
-    r,
-    stacked_state: state.to_u2(),
+#[wasm_bindgen(js_name = unpackMicroLoose)]
+pub fn unpack_micro_loose(v: u32) -> Result<JsValue, JsValue> {
+  let (local_q, local_r, x, y) = core_packed::unpack_micro_loose(v);
+  serde_wasm_bindgen::to_value(&MicroLooseUnpacked {
+    local_q,
+    local_r,
+    x,
+    y,
   })
   .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-#[wasm_bindgen(js_name = packStackMicroZone)]
-pub fn pack_stack_micro_zone(position: u8, direction: u8, stacked_state: u8) -> u8 {
-  core_packed::pack_stack_micro_zone(
-    position,
-    direction,
-    core_packed::StackedState::from_u2(stacked_state),
-  )
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StackMicroZoneUnpacked {
-  position: u8,
-  direction: u8,
-  stacked_state: u8,
-}
-
-#[wasm_bindgen(js_name = unpackStackMicroZone)]
-pub fn unpack_stack_micro_zone(v: u8) -> Result<JsValue, JsValue> {
-  let (position, direction, state) = core_packed::unpack_stack_micro_zone(v);
-  serde_wasm_bindgen::to_value(&StackMicroZoneUnpacked {
-    position,
-    direction,
-    stacked_state: state.to_u2(),
-  })
-  .map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-#[wasm_bindgen(js_name = packSlotMicroZone)]
-pub fn pack_slot_micro_zone(direction: u8) -> u8 {
-  core_packed::pack_slot_micro_zone(direction)
-}
-
-#[wasm_bindgen(js_name = isStackLayout)]
-pub fn is_stack_layout(stacked_state: u8, surface: u8) -> bool {
-  core_packed::is_stack_layout(
-    core_packed::StackedState::from_u2(stacked_state),
-    surface,
-  )
+#[wasm_bindgen(js_name = packMicroSnap)]
+pub fn pack_micro_snap(local_q: u8, local_r: u8) -> u32 {
+  core_packed::pack_micro_snap(local_q, local_r)
 }
 
 #[wasm_bindgen(js_name = packDefinition)]
