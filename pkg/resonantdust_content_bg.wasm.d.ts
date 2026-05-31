@@ -3,8 +3,10 @@
 export const memory: WebAssembly.Memory;
 export const allBlueprints: () => [number, number, number];
 export const allTextures: () => [number, number, number];
+export const aspectDescription: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const aspectIdByName: (a: number, b: number) => [number, number, number];
 export const aspectInfo: (a: number) => [number, number, number];
+export const aspectLabel: (a: number, b: number, c: number) => [number, number, number, number];
 export const aspectValue: (a: number, b: number, c: number) => [number, number, number];
 export const blueprintById: (a: number) => [number, number, number];
 export const blueprintByKey: (a: number, b: number) => [number, number, number];
@@ -21,7 +23,8 @@ export const findPackedByKey: (a: number, b: number) => [number, number, number]
 export const hasCardFlag: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const inventoryLayer: () => number;
 export const isHexType: (a: number) => [number, number, number];
-export const miniZoneLayer: () => number;
+export const localeLabel: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const localeVariant: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
 export const packDefinition: (a: number, b: number) => number;
 export const packMacroZone: (a: number, b: number) => bigint;
 export const packMicroLoose: (a: number, b: number, c: number, d: number) => number;

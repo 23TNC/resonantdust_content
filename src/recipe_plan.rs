@@ -79,6 +79,36 @@ pub fn compute_holds(
     holds
 }
 
+/// HoldKinds the recipe assigns to its **synthetic-tile** slot(s) — the iterators
+/// whose binding contains the sentinel `0` (an un-promoted tile). Returns `None`
+/// when **no** slot binds the tile: the recipe doesn't reference it, so the
+/// gateway must NOT promote one (else any recipe fired on a cell that happens to
+/// carry a tile — e.g. `corpus-` sitting on a tile — would spawn a spurious
+/// tile-card). `compute_holds` skips the sentinel (it has no `card_id`), so when
+/// the tile IS bound the gateway resolves its hold here and acquires it on the
+/// promoted tile-card by position — same `(slot_hold, position_hold)` mapping as
+/// a real binding (`use`/`claim` → `slot_hold`, `share`/`borrow` → `slot_share`);
+/// ORs across slots.
+pub fn synthetic_tile_holds(recipe: &Recipe, bindings: &[Vec<u32>]) -> Option<HoldKinds> {
+    let mut kinds = HoldKinds::default();
+    let mut bound = false;
+    for (i, it) in recipe.iterators.iter().enumerate() {
+        let Some(row) = bindings.get(i) else { continue };
+        if row.iter().any(|&id| id == 0) {
+            bound = true;
+            if it.slot_hold {
+                kinds.slot_hold = true;
+            } else {
+                kinds.slot_share = true;
+            }
+            if it.position_hold {
+                kinds.position_hold = true;
+            }
+        }
+    }
+    bound.then_some(kinds)
+}
+
 // ===== output tape → effects (storage-agnostic plan) =====================
 //
 // Port of the card-only half of `shard::action_completion`'s `plan()` /
@@ -155,6 +185,12 @@ pub struct ActionPlan {
     pub effects: Vec<Effect>,
     /// Per-card holds the action claims (`compute_holds`).
     pub holds: BTreeMap<u32, HoldKinds>,
+    /// Holds for the action's **synthetic tile** (the sentinel-`0` slot), when the
+    /// recipe targets one. `compute_holds` skips the sentinel (no card_id), so the
+    /// gateway promotes the tile up front and acquires *these* on it by position
+    /// — exactly the kinds the tile slot's verb declares. `None` when the recipe
+    /// has no synthetic tile.
+    pub tile_holds: Option<HoldKinds>,
 }
 
 impl ActionPlan {
@@ -199,6 +235,13 @@ pub fn plan_output<S: CardStore>(
     synthetic: Option<SyntheticTile>,
     now_ms: u64,
 ) -> Result<ActionPlan, String> {
+    // Hold the synthetic tile only when the recipe actually BINDS it (a sentinel-0
+    // slot) AND the gate derived one. A recipe with no tile slot (e.g. `corpus-`
+    // fired on a card that happens to sit on a tile) must not promote a tile.
+    let tile_holds = synthetic
+        .is_some()
+        .then(|| synthetic_tile_holds(recipe, bindings))
+        .flatten();
     let mut walker = TapeWalker::new(synthetic);
     for (i, stmt) in recipe.output.iter().enumerate() {
         execute_stmt(store, &mut walker, recipe, stmt, bindings, root, now_ms)
@@ -210,6 +253,7 @@ pub fn plan_output<S: CardStore>(
         duration: walker.duration,
         effects: walker.pending,
         holds,
+        tile_holds,
     })
 }
 
@@ -900,6 +944,27 @@ mod tests {
             slot_hold,
             position_hold,
         }
+    }
+
+    #[test]
+    fn synthetic_tile_holds_only_when_tile_bound() {
+        // Iterator 0 bound to the sentinel-`0` tile, `use`/`claim`-style → slot_hold.
+        let r = recipe_with(false, true, false, vec![iter(true, false)]);
+        let h = synthetic_tile_holds(&r, &[vec![0]]).expect("tile bound");
+        assert!(h.slot_hold && !h.slot_share);
+
+        // `share`/`borrow`-style tile slot (slot_hold=false) → slot_share (+ pin).
+        let rs = recipe_with(false, true, false, vec![iter(false, true)]);
+        let hs = synthetic_tile_holds(&rs, &[vec![0]]).expect("tile bound");
+        assert!(hs.slot_share && hs.position_hold && !hs.slot_hold);
+
+        // No sentinel-`0` binding (root-only recipe like `corpus-`) → None, so the
+        // gateway never promotes a spurious tile on the cell the card sits on.
+        let no_tile = recipe_with(true, true, false, vec![]);
+        assert!(synthetic_tile_holds(&no_tile, &[]).is_none());
+        // ...and not even when a real-card iterator is present (no `0` in it).
+        let card_only = recipe_with(false, true, false, vec![iter(true, false)]);
+        assert!(synthetic_tile_holds(&card_only, &[vec![1027]]).is_none());
     }
 
     #[test]

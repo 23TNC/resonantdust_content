@@ -148,7 +148,65 @@ pub fn state_blocks_demotion(flags_state: u32) -> bool {
     flags_state & state_layout().demote_blocking != 0
 }
 
+/// The `flags_bk` hold/refcount field a card carries for an in-flight action.
+/// A promoted tile-card is held with these exactly like any bound card — the
+/// recipe's slot verb (`use`/`claim`→`SlotHold`, `share`/`borrow`→`SlotShare`,
+/// `position_hold` per the verb) picks which. The `u8` discriminants double as
+/// the `kind` selector the gate passes to the regions tile-hold reducers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HoldField {
+    Touch = 0,
+    SlotHold = 1,
+    SlotShare = 2,
+    PositionHold = 3,
+}
+
+/// Read a hold/refcount `field` value out of `flags_bk`.
+pub fn hold_count(flags_bk: u32, field: HoldField) -> u8 {
+    count_field(field).read(flags_bk)
+}
+
+/// `flags_bk` with `field` incremented by one (saturating at the field's max).
+pub fn increment_hold(flags_bk: u32, field: HoldField) -> u32 {
+    let f = count_field(field);
+    f.write(flags_bk, f.read(flags_bk) as u32 + 1)
+}
+
+/// `flags_bk` with `field` decremented by one (saturating at 0).
+pub fn decrement_hold(flags_bk: u32, field: HoldField) -> u32 {
+    let f = count_field(field);
+    f.write(flags_bk, (f.read(flags_bk) as u32).saturating_sub(1))
+}
+
+fn count_field(field: HoldField) -> CountField {
+    let bk = bk_layout();
+    match field {
+        HoldField::Touch => bk.touch,
+        HoldField::SlotHold => bk.slot_hold,
+        HoldField::SlotShare => bk.slot_share,
+        HoldField::PositionHold => bk.position_hold,
+    }
+}
+
 // ---- bk layout (from content/cards/flags.json) -------------------------
+
+/// A `flags_bk` refcount field's window: pre-built mask, low-bit shift, and max
+/// value (`(1<<width)-1`), for saturating refcount arithmetic.
+#[derive(Clone, Copy)]
+struct CountField {
+    mask: u32,
+    shift: u8,
+    max: u32,
+}
+
+impl CountField {
+    fn read(self, flags_bk: u32) -> u8 {
+        ((flags_bk & self.mask) >> self.shift) as u8
+    }
+    fn write(self, flags_bk: u32, value: u32) -> u32 {
+        (flags_bk & !self.mask) | ((value.min(self.max) << self.shift) & self.mask)
+    }
+}
 
 struct BkLayout {
     micro_is_card: u32,
@@ -160,6 +218,10 @@ struct BkLayout {
     tile_stock_shift: [u8; 2],
     /// Union of the six hold/refcount field masks — nonzero iff any hold is held.
     hold_counts_mask: u32,
+    touch: CountField,
+    slot_hold: CountField,
+    slot_share: CountField,
+    position_hold: CountField,
 }
 
 fn bk_layout() -> &'static BkLayout {
@@ -176,6 +238,14 @@ fn bk_layout() -> &'static BkLayout {
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| panic!("cards/flags.json: missing bk field {n:?}"))
+        };
+        let count = |n: &str| {
+            let f = field(n);
+            CountField {
+                mask: f.mask(),
+                shift: f.shift,
+                max: (((1u64 << f.width) - 1) & 0xFFFF_FFFF) as u32,
+            }
         };
         let ss = field("stack_state");
         let si = field("stack_index");
@@ -196,6 +266,10 @@ fn bk_layout() -> &'static BkLayout {
             tile_stock_mask: [t0.mask(), t1.mask()],
             tile_stock_shift: [t0.shift, t1.shift],
             hold_counts_mask,
+            touch: count("touch_count"),
+            slot_hold: count("slot_hold_count"),
+            slot_share: count("slot_share_count"),
+            position_hold: count("position_hold_count"),
         }
     })
 }
@@ -260,6 +334,29 @@ mod tests {
         let bk = write_tile_stock(write_tile_stock(0, 0, 3), 1, 2);
         assert_eq!(tile_stock(bk, 0), 3);
         assert_eq!(tile_stock(bk, 1), 2);
+    }
+
+    #[test]
+    fn hold_count_roundtrip() {
+        use HoldField::*;
+        assert_eq!(hold_count(0, SlotHold), 0);
+        // increment / decrement slot_hold
+        let bk = increment_hold(increment_hold(0, SlotHold), SlotHold);
+        assert_eq!(hold_count(bk, SlotHold), 2);
+        let bk = decrement_hold(bk, SlotHold);
+        assert_eq!(hold_count(bk, SlotHold), 1);
+        // fields are independent
+        let bk = increment_hold(bk, SlotShare);
+        assert_eq!(hold_count(bk, SlotShare), 1);
+        assert_eq!(hold_count(bk, SlotHold), 1);
+        assert!(has_active_holds(bk));
+        // decrement floors at zero
+        assert_eq!(hold_count(decrement_hold(0, SlotHold), SlotHold), 0);
+        // holds don't disturb tile stock and vice versa
+        let bk = write_tile_stock(increment_hold(0, SlotHold), 0, 3);
+        assert_eq!(tile_stock(bk, 0), 3);
+        assert_eq!(hold_count(bk, SlotHold), 1);
+        assert_eq!(hold_count(bk, Touch), 0);
     }
 
     #[test]

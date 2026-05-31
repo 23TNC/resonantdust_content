@@ -25,6 +25,20 @@ export function allBlueprints(): any;
 export function allTextures(): any;
 
 /**
+ * Look up an aspect description `variant` (dotted —
+ * `"description.simple"`) by id in `lang`, falling back to English.
+ * Replicates the inheritance `aspects.json` used to bake in: if the
+ * aspect declares no text for `variant`, the parent chain is walked
+ * and the nearest ancestor that does is used — so `berry` resolves
+ * `food`'s blurb and `fuel` resolves `fire`'s without the locale
+ * having to duplicate them. Returns `undefined` when neither the
+ * aspect nor any ancestor declares the variant. Walk depth is bounded
+ * (16) defensively, matching `is_aspect_descendant`. Throws on
+ * registry-build failure.
+ */
+export function aspectDescription(id: number, lang: string, variant: string): string | undefined;
+
+/**
  * Look up an aspect's numeric id by its declared name (the JSON
  * key under `cards/aspects.json` — `"wood"`, `"corpus+"`, etc.).
  * Returns `undefined` when the name isn't registered. Throws on
@@ -44,6 +58,16 @@ export function aspectIdByName(name: string): number | undefined;
  * failure.
  */
 export function aspectInfo(id: number): any;
+
+/**
+ * Look up the display label for an aspect by id in `lang`, falling
+ * back to English. Returns `undefined` for `ASPECT_NONE` / unknown
+ * ids or when no locale entry exists. Aspect locale entries are keyed
+ * flat by the aspect's globally-unique `name` (see
+ * `locales/aspects/en.json`); labels do NOT inherit along the
+ * parent chain. Pairs with [`aspect_description`].
+ */
+export function aspectLabel(id: number, lang: string): string | undefined;
 
 /**
  * Read the numeric value of a named aspect off a packed card
@@ -142,8 +166,8 @@ export function cardFlagFieldValueIn(field: string, host: number, name: string):
 export function cardLabel(packed_def: number, lang: string): string | undefined;
 
 /**
- * Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
- * `"tile"`). Returns `undefined` for unknown names. Source of truth
+ * Look up a `card_type` id by name (e.g. `"soul"`, `"tile"`).
+ * Returns `undefined` for unknown names. Source of truth
  * is `content/cards/types.json`. Used by JS-side code that needs to
  * branch on a card's type (without hard-coding the numeric id).
  */
@@ -185,7 +209,29 @@ export function inventoryLayer(): number;
  */
 export function isHexType(type_id: number): boolean;
 
-export function miniZoneLayer(): number;
+/**
+ * Generic locale label lookup — wraps `locales_core::label(domain,
+ * lang, path)` with the standard English fallback. Exposed for
+ * client-only domains that don't warrant a dedicated wrapper (today
+ * `panels`, whose strings never touch the sim). `domain` is the
+ * `locales/<domain>/` folder name; `path` is the dotted entry path
+ * (for panels, the flat panel key matching
+ * `content/panels/defaults.json`). Returns `undefined` when neither
+ * `lang` nor English registers the entry — callers fall back to the
+ * bare key. Throws on registry-build failure.
+ */
+export function localeLabel(domain: string, path: string, lang: string): string | undefined;
+
+/**
+ * Generic locale variant lookup — wraps `locales_core::variant(domain,
+ * lang, path, variant)` with English fallback. `variant` is the
+ * dotted variant key; panels store each non-title string as a flat
+ * variant, so the key is the bare string name (`"resetPanels"`,
+ * `"inputPlaceholder"`, …). Returns `undefined` when the entry exists
+ * but lacks the variant, or when neither language has the entry.
+ * Throws on registry-build failure.
+ */
+export function localeVariant(domain: string, path: string, variant: string, lang: string): string | undefined;
 
 export function packDefinition(card_type: number, def_id: number): number;
 
@@ -260,8 +306,10 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly allBlueprints: () => [number, number, number];
     readonly allTextures: () => [number, number, number];
+    readonly aspectDescription: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly aspectIdByName: (a: number, b: number) => [number, number, number];
     readonly aspectInfo: (a: number) => [number, number, number];
+    readonly aspectLabel: (a: number, b: number, c: number) => [number, number, number, number];
     readonly aspectValue: (a: number, b: number, c: number) => [number, number, number];
     readonly blueprintById: (a: number) => [number, number, number];
     readonly blueprintByKey: (a: number, b: number) => [number, number, number];
@@ -278,7 +326,8 @@ export interface InitOutput {
     readonly hasCardFlag: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly inventoryLayer: () => number;
     readonly isHexType: (a: number) => [number, number, number];
-    readonly miniZoneLayer: () => number;
+    readonly localeLabel: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly localeVariant: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly packDefinition: (a: number, b: number) => number;
     readonly packMacroZone: (a: number, b: number) => bigint;
     readonly packMicroLoose: (a: number, b: number, c: number, d: number) => number;

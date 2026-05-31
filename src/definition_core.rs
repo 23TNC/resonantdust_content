@@ -126,10 +126,12 @@ pub enum AspectCategory {
 #[serde(rename_all = "camelCase")]
 pub struct Aspect {
   pub id: AspectId,
-  /// Programmatic name from the JSON, e.g. `"combat"`.
+  /// Programmatic name from the JSON, e.g. `"combat"`. Doubles as the
+  /// flat lookup key into `content/locales/aspects/<lang>.json` for
+  /// display label / description resolution — descriptions are NOT
+  /// stored on the aspect; clients resolve them via the locales
+  /// registry (`aspectLabel` / `aspectDescription`).
   pub name: String,
-  /// Human-readable description from the JSON.
-  pub description: String,
   /// Unicode icon representing this aspect. Defaults to `""` when
   /// the entry (and its ancestors) declare none — typical for
   /// `trait`-category entries that never render.
@@ -276,7 +278,6 @@ fn build_aspects() -> Result<AspectRegistry, String> {
         None,
         None,
         None,
-        None,
         *category,
         &mut by_id,
         &mut id_by_name,
@@ -305,7 +306,7 @@ fn build_aspects() -> Result<AspectRegistry, String> {
 
 /// Register one aspect entry and recurse into any nested sub-aspects.
 ///
-/// Property keys (`icon`, `description`) on the entry are read for
+/// Property keys (`icon`, `color`) on the entry are read for
 /// this aspect's own metadata; every *other* object-valued key is
 /// treated as a sub-aspect with this aspect as its parent. `_`-
 /// prefixed keys are skipped (the `_comment` convention). Scalar
@@ -313,16 +314,15 @@ fn build_aspects() -> Result<AspectRegistry, String> {
 /// instead of silently dropped. The recursion is top-down so a
 /// child's parent id is always already registered when we reach it.
 ///
-/// `inherited_icon` / `inherited_color` / `inherited_description` are
-/// the values to fall back on when this aspect omits its own
-/// `icon` / `color` / `description` — `None` at the top level, and
-/// the nearest ancestor's resolved values when recursing into
-/// children. Lets sub-aspects collapse onto their parent's visuals
-/// and copy so callers can render whole families with a single glyph,
-/// color, and blurb while the JSON stays terse. For description an
-/// empty string is treated the same as "missing" (inherit if a
-/// non-empty ancestor exists, else stay empty — `anima` / `sollertia`
-/// are intentionally blank roots).
+/// `inherited_icon` / `inherited_color` are the values to fall back
+/// on when this aspect omits its own `icon` / `color` — `None` at the
+/// top level, and the nearest ancestor's resolved values when
+/// recursing into children. Lets sub-aspects collapse onto their
+/// parent's visuals so callers can render whole families with a single
+/// glyph and color while the JSON stays terse. (Descriptions used to
+/// inherit the same way; they now live in
+/// `locales/aspects/<lang>.json` and inherit lookup-side via
+/// `aspectDescription`'s parent-chain walk.)
 /// Default color when an entry (and its ancestors) declare none.
 /// Neutral grey — picked as a "this entry doesn't care about
 /// display" signal that still renders without crashing.
@@ -336,7 +336,6 @@ fn register_aspect_recursive(
   parent: Option<AspectId>,
   inherited_icon: Option<&str>,
   inherited_color: Option<u32>,
-  inherited_description: Option<&str>,
   category: AspectCategory,
   by_id: &mut Vec<Aspect>,
   id_by_name: &mut BTreeMap<String, AspectId>,
@@ -350,20 +349,6 @@ fn register_aspect_recursive(
   }
   let id = *next_id as AspectId;
   *next_id += 1;
-
-  let own_description: Option<&str> = match entry.get("description") {
-    None => None,
-    Some(v) => Some(v.as_str().ok_or_else(|| {
-      format!(
-        "aspects.json: aspect {}/{} 'description' is not a string",
-        group, name
-      )
-    })?),
-  };
-  let description = match own_description {
-    Some(s) if !s.is_empty() => s.to_string(),
-    _ => inherited_description.unwrap_or("").to_string(),
-  };
 
   // `icon` is optional throughout — defaults to `""` if no
   // ancestor declares one. Most `trait`-category entries never
@@ -402,7 +387,6 @@ fn register_aspect_recursive(
   by_id.push(Aspect {
     id,
     name: name.to_string(),
-    description: description.clone(),
     icon: icon.clone(),
     color,
     group: group.to_string(),
@@ -412,15 +396,16 @@ fn register_aspect_recursive(
   id_by_name.insert(name.to_string(), id);
 
   // Walk object-valued keys as nested sub-aspects. Property keys
-  // (`icon` / `description` / `color`) are scalars / inline objects
-  // on this aspect; `_`-prefixed keys are documentation. Anything
-  // else with an object value is a child; a non-object value under
-  // an unrecognised key is an authoring error and rejects.
+  // (`icon` / `color`) are scalars on this aspect; `_`-prefixed keys
+  // are documentation. Anything else with an object value is a child;
+  // a non-object value under an unrecognised key is an authoring error
+  // and rejects — a stray `description` now lands here (descriptions
+  // live in `locales/aspects/<lang>.json`, not this file).
   for (sub_name, sub_value) in entry {
     if sub_name.starts_with('_') {
       continue;
     }
-    if matches!(sub_name.as_str(), "icon" | "description" | "color") {
+    if matches!(sub_name.as_str(), "icon" | "color") {
       continue;
     }
     let sub_obj = sub_value.as_object().ok_or_else(|| {
@@ -436,7 +421,6 @@ fn register_aspect_recursive(
       Some(id),
       Some(&icon),
       Some(color),
-      Some(&description),
       category,
       by_id,
       id_by_name,
@@ -1782,28 +1766,57 @@ mod tests {
     validate_lifecycle_recipes().expect("lifecycle recipe validation");
   }
 
-  /// Sub-aspects that omit description (or set it to `""`) must
-  /// inherit from the nearest ancestor that declared one. Children
-  /// that declare their own description keep it. Roots with an
-  /// empty description stay empty.
+  /// `icon` / `color` inheritance: a sub-aspect that omits them
+  /// collapses onto its nearest declaring ancestor.
   #[test]
-  fn description_inherits_from_ancestor() {
+  fn icon_color_inherit_from_ancestor() {
     let reg = build_aspects().expect("aspects.json parses");
     let by_name = |n: &str| {
       let id = *reg.id_by_name.get(n).unwrap_or_else(|| panic!("aspect {n} missing"));
       &reg.by_id[(id - 1) as usize]
     };
-    // berry / fuel omit description → inherit from food / fire.
-    assert_eq!(by_name("berry").description, "Sustenance, edible produce");
-    assert_eq!(by_name("fuel").description, "Combustible energy source");
-    // Children with their own description keep it.
-    assert_eq!(by_name("pine").description, "Pine — fast-growing softwood");
-    assert_eq!(by_name("corpus+").description, "Standard corpus — baseline vitality");
-    // Roots with explicitly empty descriptions stay empty.
-    assert_eq!(by_name("anima").description, "");
-    assert_eq!(by_name("sollertia").description, "");
-    // Sanity: icon/color inheritance still works for the same children.
     assert_eq!(by_name("berry").icon, by_name("food").icon);
     assert_eq!(by_name("berry").color, by_name("food").color);
+    assert_eq!(by_name("fuel").icon, by_name("fire").icon);
+  }
+
+  /// Aspect descriptions now live in `locales/aspects/en.json`,
+  /// resolved with the same ancestor inheritance the `description`
+  /// field used to bake in: a sub-aspect with no own entry falls back
+  /// to its nearest ancestor that declares one (this mirrors
+  /// `wasm_api::aspect_description`'s parent-chain walk, which is
+  /// `js`-gated and so can't be called here directly). Children with
+  /// their own entry keep it; empty roots resolve to nothing.
+  #[test]
+  fn description_resolves_via_locale_with_inheritance() {
+    let reg = build_aspects().expect("aspects.json parses");
+    // Walk name → parent chain, returning the first ancestor's
+    // `description.simple` locale entry (or None).
+    let resolve = |name: &str| -> Option<String> {
+      let mut cur = *reg.id_by_name.get(name)?;
+      for _ in 0..16 {
+        let aspect = &reg.by_id[(cur - 1) as usize];
+        if let Some(text) =
+          crate::locales_core::variant("aspects", "en", &aspect.name, "description.simple")
+            .expect("locale registry builds")
+        {
+          return Some(text.to_string());
+        }
+        match aspect.parent {
+          Some(p) => cur = p,
+          None => return None,
+        }
+      }
+      None
+    };
+    // berry / fuel carry no own entry → inherit from food / fire.
+    assert_eq!(resolve("berry").as_deref(), Some("Sustenance, edible produce"));
+    assert_eq!(resolve("fuel").as_deref(), Some("Combustible energy source"));
+    // Children with their own entry keep it.
+    assert_eq!(resolve("pine").as_deref(), Some("Pine — fast-growing softwood"));
+    assert_eq!(resolve("corpus+").as_deref(), Some("Standard corpus — baseline vitality"));
+    // Empty roots resolve to nothing (no own entry, no ancestor).
+    assert_eq!(resolve("anima"), None);
+    assert_eq!(resolve("sollertia"), None);
   }
 }

@@ -38,6 +38,39 @@ export function allTextures() {
 }
 
 /**
+ * Look up an aspect description `variant` (dotted —
+ * `"description.simple"`) by id in `lang`, falling back to English.
+ * Replicates the inheritance `aspects.json` used to bake in: if the
+ * aspect declares no text for `variant`, the parent chain is walked
+ * and the nearest ancestor that does is used — so `berry` resolves
+ * `food`'s blurb and `fuel` resolves `fire`'s without the locale
+ * having to duplicate them. Returns `undefined` when neither the
+ * aspect nor any ancestor declares the variant. Walk depth is bounded
+ * (16) defensively, matching `is_aspect_descendant`. Throws on
+ * registry-build failure.
+ * @param {number} id
+ * @param {string} lang
+ * @param {string} variant
+ * @returns {string | undefined}
+ */
+export function aspectDescription(id, lang, variant) {
+    const ptr0 = passStringToWasm0(lang, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(variant, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.aspectDescription(id, ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v3;
+    if (ret[0] !== 0) {
+        v3 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v3;
+}
+
+/**
  * Look up an aspect's numeric id by its declared name (the JSON
  * key under `cards/aspects.json` — `"wood"`, `"corpus+"`, etc.).
  * Returns `undefined` when the name isn't registered. Throws on
@@ -74,6 +107,32 @@ export function aspectInfo(id) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Look up the display label for an aspect by id in `lang`, falling
+ * back to English. Returns `undefined` for `ASPECT_NONE` / unknown
+ * ids or when no locale entry exists. Aspect locale entries are keyed
+ * flat by the aspect's globally-unique `name` (see
+ * `locales/aspects/en.json`); labels do NOT inherit along the
+ * parent chain. Pairs with [`aspect_description`].
+ * @param {number} id
+ * @param {string} lang
+ * @returns {string | undefined}
+ */
+export function aspectLabel(id, lang) {
+    const ptr0 = passStringToWasm0(lang, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.aspectLabel(id, ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v2;
+    if (ret[0] !== 0) {
+        v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v2;
 }
 
 /**
@@ -296,8 +355,8 @@ export function cardLabel(packed_def, lang) {
 }
 
 /**
- * Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
- * `"tile"`). Returns `undefined` for unknown names. Source of truth
+ * Look up a `card_type` id by name (e.g. `"soul"`, `"tile"`).
+ * Returns `undefined` for unknown names. Source of truth
  * is `content/cards/types.json`. Used by JS-side code that needs to
  * branch on a card's type (without hard-coding the numeric id).
  * @param {string} name
@@ -394,11 +453,72 @@ export function isHexType(type_id) {
 }
 
 /**
- * @returns {number}
+ * Generic locale label lookup — wraps `locales_core::label(domain,
+ * lang, path)` with the standard English fallback. Exposed for
+ * client-only domains that don't warrant a dedicated wrapper (today
+ * `panels`, whose strings never touch the sim). `domain` is the
+ * `locales/<domain>/` folder name; `path` is the dotted entry path
+ * (for panels, the flat panel key matching
+ * `content/panels/defaults.json`). Returns `undefined` when neither
+ * `lang` nor English registers the entry — callers fall back to the
+ * bare key. Throws on registry-build failure.
+ * @param {string} domain
+ * @param {string} path
+ * @param {string} lang
+ * @returns {string | undefined}
  */
-export function miniZoneLayer() {
-    const ret = wasm.miniZoneLayer();
-    return ret;
+export function localeLabel(domain, path, lang) {
+    const ptr0 = passStringToWasm0(domain, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(lang, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.localeLabel(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v4;
+    if (ret[0] !== 0) {
+        v4 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v4;
+}
+
+/**
+ * Generic locale variant lookup — wraps `locales_core::variant(domain,
+ * lang, path, variant)` with English fallback. `variant` is the
+ * dotted variant key; panels store each non-title string as a flat
+ * variant, so the key is the bare string name (`"resetPanels"`,
+ * `"inputPlaceholder"`, …). Returns `undefined` when the entry exists
+ * but lacks the variant, or when neither language has the entry.
+ * Throws on registry-build failure.
+ * @param {string} domain
+ * @param {string} path
+ * @param {string} variant
+ * @param {string} lang
+ * @returns {string | undefined}
+ */
+export function localeVariant(domain, path, variant, lang) {
+    const ptr0 = passStringToWasm0(domain, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(variant, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passStringToWasm0(lang, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.localeVariant(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v5;
+    if (ret[0] !== 0) {
+        v5 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v5;
 }
 
 /**

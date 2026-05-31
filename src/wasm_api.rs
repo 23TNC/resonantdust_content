@@ -66,6 +66,57 @@ pub fn aspect_id_by_name(name: &str) -> Result<Option<u8>, JsValue> {
   core_aspect_id(name).map_err(|e| JsValue::from_str(&e))
 }
 
+/// Look up the display label for an aspect by id in `lang`, falling
+/// back to English. Returns `undefined` for `ASPECT_NONE` / unknown
+/// ids or when no locale entry exists. Aspect locale entries are keyed
+/// flat by the aspect's globally-unique `name` (see
+/// `locales/aspects/en.json`); labels do NOT inherit along the
+/// parent chain. Pairs with [`aspect_description`].
+#[wasm_bindgen(js_name = aspectLabel)]
+pub fn aspect_label(id: u8, lang: &str) -> Result<Option<String>, JsValue> {
+  let Some(aspect) = core_aspect(id).map_err(|e| JsValue::from_str(&e))? else {
+    return Ok(None);
+  };
+  let label = crate::locales_core::label("aspects", lang, &aspect.name)
+    .map_err(|e| JsValue::from_str(&e))?;
+  Ok(label.map(String::from))
+}
+
+/// Look up an aspect description `variant` (dotted —
+/// `"description.simple"`) by id in `lang`, falling back to English.
+/// Replicates the inheritance `aspects.json` used to bake in: if the
+/// aspect declares no text for `variant`, the parent chain is walked
+/// and the nearest ancestor that does is used — so `berry` resolves
+/// `food`'s blurb and `fuel` resolves `fire`'s without the locale
+/// having to duplicate them. Returns `undefined` when neither the
+/// aspect nor any ancestor declares the variant. Walk depth is bounded
+/// (16) defensively, matching `is_aspect_descendant`. Throws on
+/// registry-build failure.
+#[wasm_bindgen(js_name = aspectDescription)]
+pub fn aspect_description(
+  id: u8,
+  lang: &str,
+  variant: &str,
+) -> Result<Option<String>, JsValue> {
+  let mut current = id;
+  for _ in 0..16 {
+    let Some(aspect) = core_aspect(current).map_err(|e| JsValue::from_str(&e))? else {
+      return Ok(None);
+    };
+    if let Some(text) =
+      crate::locales_core::variant("aspects", lang, &aspect.name, variant)
+        .map_err(|e| JsValue::from_str(&e))?
+    {
+      return Ok(Some(text.to_string()));
+    }
+    match aspect.parent {
+      Some(p) => current = p,
+      None => return Ok(None),
+    }
+  }
+  Ok(None)
+}
+
 /// Decode a packed `(cardType:u4 | definitionId:u12)` value into a
 /// `CardDefinition`-shaped JS object. Returns `null` if no card
 /// matches the packed value. Throws a string error if the card
@@ -109,6 +160,45 @@ pub fn card_label(packed_def: u16, lang: &str) -> Result<Option<String>, JsValue
   Ok(label.map(String::from))
 }
 
+/// Generic locale label lookup — wraps `locales_core::label(domain,
+/// lang, path)` with the standard English fallback. Exposed for
+/// client-only domains that don't warrant a dedicated wrapper (today
+/// `panels`, whose strings never touch the sim). `domain` is the
+/// `locales/<domain>/` folder name; `path` is the dotted entry path
+/// (for panels, the flat panel key matching
+/// `content/panels/defaults.json`). Returns `undefined` when neither
+/// `lang` nor English registers the entry — callers fall back to the
+/// bare key. Throws on registry-build failure.
+#[wasm_bindgen(js_name = localeLabel)]
+pub fn locale_label(
+  domain: &str,
+  path: &str,
+  lang: &str,
+) -> Result<Option<String>, JsValue> {
+  let label = crate::locales_core::label(domain, lang, path)
+    .map_err(|e| JsValue::from_str(&e))?;
+  Ok(label.map(String::from))
+}
+
+/// Generic locale variant lookup — wraps `locales_core::variant(domain,
+/// lang, path, variant)` with English fallback. `variant` is the
+/// dotted variant key; panels store each non-title string as a flat
+/// variant, so the key is the bare string name (`"resetPanels"`,
+/// `"inputPlaceholder"`, …). Returns `undefined` when the entry exists
+/// but lacks the variant, or when neither language has the entry.
+/// Throws on registry-build failure.
+#[wasm_bindgen(js_name = localeVariant)]
+pub fn locale_variant(
+  domain: &str,
+  path: &str,
+  variant: &str,
+  lang: &str,
+) -> Result<Option<String>, JsValue> {
+  let text = crate::locales_core::variant(domain, lang, path, variant)
+    .map_err(|e| JsValue::from_str(&e))?;
+  Ok(text.map(String::from))
+}
+
 /// **Legacy** — bit position (0..=31) of a card-flag by name, searched
 /// across both `cards_state` and `cards_bk` fields (state first).
 /// Returns `undefined` if no single-bit flag with that name exists in
@@ -141,8 +231,8 @@ pub fn card_flag_field_shape(field: &str, name: &str) -> Result<Option<Vec<u8>>,
   Ok(f.map(|f| vec![f.shift, f.width]))
 }
 
-/// Look up a `card_type` id by name (e.g. `"mini_zone"`, `"soul"`,
-/// `"tile"`). Returns `undefined` for unknown names. Source of truth
+/// Look up a `card_type` id by name (e.g. `"soul"`, `"tile"`).
+/// Returns `undefined` for unknown names. Source of truth
 /// is `content/cards/types.json`. Used by JS-side code that needs to
 /// branch on a card's type (without hard-coding the numeric id).
 #[wasm_bindgen(js_name = cardTypeId)]
@@ -501,10 +591,8 @@ pub fn pocket_dimension_layer() -> u8 {
   core_packed::POCKET_DIMENSION_LAYER
 }
 
-#[wasm_bindgen(js_name = miniZoneLayer)]
-pub fn mini_zone_layer() -> u8 {
-  core_packed::MINI_ZONE_LAYER
-}
+// (miniZoneLayer export removed — mini_zone functionality stripped; the
+// MINI_ZONE_LAYER band stays reserved in `packed.rs`.)
 
 #[wasm_bindgen(js_name = worldLayer)]
 pub fn world_layer() -> u8 {

@@ -66,10 +66,11 @@ pub const SNAP_HEX: u8 = 2;
 pub const SNAP_RECT: u8 = 3;
 
 /// Default loose `kind` for a card placed loose on `surface`: hex-grid surfaces
-/// (world, mini-zone) use `LOOSE_HEX`; container surfaces (inventory, pocket
-/// dimension, player inventory) use `LOOSE_RECT`.
+/// (world) use `LOOSE_HEX`; container surfaces (inventory, pocket dimension,
+/// player inventory) use `LOOSE_RECT`. (mini_zone stripped — see
+/// [`MINI_ZONE_LAYER`]; re-add the band here when it returns.)
 pub fn loose_kind_for_surface(surface: u8) -> u8 {
-    if surface >= WORLD_LAYER || surface == MINI_ZONE_LAYER {
+    if surface >= WORLD_LAYER {
         LOOSE_HEX
     } else {
         LOOSE_RECT
@@ -100,25 +101,25 @@ pub fn loose_kind_for_surface(surface: u8) -> u8 {
 // - POCKET_DIMENSION_LAYER (32):   `macro_zone` = the anchor card's
 //                                  `card_id`. A private interior
 //                                  carried by an anchor card.
-// - MINI_ZONE_LAYER (63):          `macro_zone` = the anchor card's
-//                                  `card_id`. A radius-3 hex disk
-//                                  overlaying the world wherever
-//                                  the anchor is placed. The anchor
-//                                  itself lives at WORLD_LAYER.
+// - MINI_ZONE_LAYER (63):          RESERVED. mini_zone functionality was
+//                                  stripped (no mini_zones exist yet); the
+//                                  band number is held so re-implementation
+//                                  doesn't renumber the surface map. When it
+//                                  returns it sits just below WORLD_LAYER so
+//                                  stack-layout rules apply and world-only
+//                                  queries skip its contents.
 // - WORLD_LAYER (64) and above:    `macro_zone` = packed
 //                                  `(chunkQ:i16, chunkR:i16)`. The
 //                                  shared world hex grid.
 //
 // The split at `< WORLD_LAYER` is what existing code keys "stack
 // layout" rules and inventory-like behavior off. The split at
-// `>= WORLD_LAYER` is what world-vs-personal queries key off. The
-// MINI_ZONE_LAYER sits just below WORLD_LAYER intentionally: stack-
-// layout rules apply (cards on mini_zone tiles can chain with the
-// existing rect-stack machinery), and world-only queries continue
-// to skip mini_zone contents.
+// `>= WORLD_LAYER` is what world-vs-personal queries key off.
 pub const INVENTORY_LAYER: u8 = 1;
 pub const PLAYER_INVENTORY_LAYER: u8 = 2;
 pub const POCKET_DIMENSION_LAYER: u8 = 32;
+/// RESERVED band for a future mini_zone (functionality stripped). Kept so the
+/// surface map isn't renumbered; currently referenced only by packing tests.
 pub const MINI_ZONE_LAYER: u8 = 63;
 pub const WORLD_LAYER: u8 = 64;
 
@@ -270,7 +271,7 @@ pub fn with_owner(v: u64, owner: u32) -> u64 {
 /// Build a complete `macro_zone` from its fields. The single server-side
 /// combiner: `owner_card_id` in bits 32-63, `surface` in 24-31, and the two
 /// signed 12-bit coords in the low 24. World uses `owner = 0`; container
-/// surfaces (inventory / mini_zone / pocket) pass the soul / anchor card_id as
+/// surfaces (inventory / pocket) pass the soul / anchor card_id as
 /// the owner with `(q, r) = (0, 0)`.
 pub fn pack_macro_zone_full(owner: u32, surface: u8, q: i16, r: i16) -> u64 {
     with_owner(with_surface(pack_macro_zone(q, r), surface), owner)
