@@ -13,11 +13,14 @@
 //! magnetic discipline — the legacy `validate_bindings`) stay on the DB side:
 //! the per-shard hold/dedup reducers the gateway calls are the race guard.
 
-use crate::definition_core::{aspect_id, decode_definition, is_aspect_descendant, AspectId};
+use crate::definition_core::{
+    aspect_id, decode_definition, is_aspect_descendant, lifecycle_recipe_for_def, AspectId,
+};
 use crate::flags_core::{flag_bit, flag_field};
 use crate::packed::unpack_definition;
 use crate::recipe_core::{Recipe, Seg, Stmt};
 use crate::recipe_statement::StatementValue;
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 /// `card_type` of the tile-as-card family (zone-tile cards carry per-row
@@ -56,6 +59,11 @@ struct BkLayout {
     stack_state_shift: u8,
     tile_stock_mask: [u32; 2],
     tile_stock_shift: [u8; 2],
+    /// Refcount hold fields — `(mask, shift)` each. Read as `count > 0` gates.
+    slot_hold_count: (u32, u8),
+    slot_share_count: (u32, u8),
+    drop_hold_count: (u32, u8),
+    touch_count: (u32, u8),
 }
 
 fn bk_layout() -> &'static BkLayout {
@@ -76,18 +84,54 @@ fn bk_layout() -> &'static BkLayout {
         let ss = field("stack_state");
         let t0 = field("tile_stock_0");
         let t1 = field("tile_stock_1");
+        let cf = |n: &str| {
+            let f = field(n);
+            (f.mask(), f.shift)
+        };
         BkLayout {
             micro_is_card_mask: bit("micro_is_card"),
             stack_state_mask: ss.mask(),
             stack_state_shift: ss.shift,
             tile_stock_mask: [t0.mask(), t1.mask()],
             tile_stock_shift: [t0.shift, t1.shift],
+            slot_hold_count: cf("slot_hold_count"),
+            slot_share_count: cf("slot_share_count"),
+            drop_hold_count: cf("drop_hold_count"),
+            touch_count: cf("touch_count"),
         }
     })
 }
 
+/// `cards_state` bits the binding validator gates on.
+struct StateLayout {
+    dead: u32,
+    magnetic: u32,
+    is_owned_by_player: u32,
+}
+
+fn state_layout() -> &'static StateLayout {
+    static L: OnceLock<StateLayout> = OnceLock::new();
+    L.get_or_init(|| {
+        let bit = |n: &str| {
+            1u32 << flag_bit("cards_state", n)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| panic!("cards/flags.json: missing state bit {n:?}"))
+        };
+        StateLayout {
+            dead: bit("dead"),
+            magnetic: bit("magnetic"),
+            is_owned_by_player: bit("is_owned_by_player"),
+        }
+    })
+}
+
+fn count_of(flags_bk: u32, (mask, shift): (u32, u8)) -> u32 {
+    (flags_bk & mask) >> shift
+}
+
 /// True when `micro_location` is a root card_id (the card is a stack member).
-fn micro_is_card(view: &CardView) -> bool {
+pub(crate) fn micro_is_card(view: &CardView) -> bool {
     view.flags_bk & bk_layout().micro_is_card_mask != 0
 }
 
@@ -118,6 +162,145 @@ pub fn validate_input<S: CardStore>(
     for (i, stmt) in recipe.input.iter().enumerate() {
         verify_stmt(store, recipe, stmt, root, bindings, synthetic, now_ms)
             .map_err(|e| format!("input[{i}]: {e}"))?;
+    }
+    Ok(())
+}
+
+/// World-anonymous player id (cards whose owner chain bottoms out at 0).
+pub const WORLD_PLAYER_ID: u32 = 0;
+const OWNER_WALK_DEPTH_CAP: u32 = 32;
+const TOUCH_COUNT_CLIENT_CAP: u32 = 3;
+
+/// Walk a card's `owner_id` chain to the responsible player. A card carrying
+/// `is_owned_by_player` names its player directly in `owner_id`; otherwise the
+/// owner is another card and we recurse. A chain that bottoms out at owner 0
+/// resolves to [`WORLD_PLAYER_ID`]. Port of `shard::cards::owning_player` over
+/// [`CardStore`]. `None` only on a missing row or a cycle past the depth cap.
+pub fn owning_player<S: CardStore>(store: &S, card_id: u32, now_ms: u64) -> Option<u32> {
+    let st = state_layout();
+    let mut cur = card_id;
+    for _ in 0..OWNER_WALK_DEPTH_CAP {
+        let row = store.card_at(cur, now_ms)?;
+        if row.flags_state & st.is_owned_by_player != 0 {
+            return Some(row.owner_id);
+        }
+        if row.owner_id == 0 {
+            return Some(WORLD_PLAYER_ID);
+        }
+        cur = row.owner_id;
+    }
+    None
+}
+
+/// Stack-vs-world validation: every bound card exists, is not dead, is not
+/// held by a conflicting in-flight action, is owned by the caller (or world),
+/// appears only once, and — if magnetic — is locked to this `recipe_id`. Port
+/// of `shard::actions::validate_bindings` over [`CardStore`].
+///
+/// NB: over a gathered snapshot the hold-count gates are best-effort (a TOCTOU
+/// window exists vs. concurrent gateways); the per-shard dedup reducer
+/// (`claim_pending`) is the exact-duplicate guard.
+pub fn validate_bindings<S: CardStore>(
+    store: &S,
+    recipe: &Recipe,
+    recipe_id: u16,
+    root: u32,
+    bindings: &[Vec<u32>],
+    caller_player_id: u32,
+    now_ms: u64,
+) -> Result<(), String> {
+    let bk = bk_layout();
+    let st = state_layout();
+
+    // Root: dead + hold-kind + touch + drop gates.
+    if root != 0 {
+        let card = store
+            .card_at(root, now_ms)
+            .ok_or_else(|| format!("root card {root} not found"))?;
+        if card.flags_state & st.dead != 0 {
+            return Err(format!("root card {root} is dead"));
+        }
+        if count_of(card.flags_bk, bk.slot_hold_count) > 0 {
+            return Err(format!(
+                "root card {root} is exclusively held by another in-flight action"
+            ));
+        }
+        if recipe.root_slot_hold && count_of(card.flags_bk, bk.slot_share_count) > 0 {
+            return Err(format!(
+                "root card {root} is shared-held by another in-flight action; cannot claim"
+            ));
+        }
+        if count_of(card.flags_bk, bk.touch_count) >= TOUCH_COUNT_CLIENT_CAP {
+            return Err(format!(
+                "root card {root} has too many concurrent in-flight actions (cap {TOUCH_COUNT_CLIENT_CAP})"
+            ));
+        }
+        if count_of(card.flags_bk, bk.drop_hold_count) > 0 {
+            return Err(format!(
+                "root card {root} blocks stacking (drop_hold_count > 0)"
+            ));
+        }
+    }
+
+    let mut seen: BTreeSet<u32> = BTreeSet::new();
+    for (iter_id, binding_row) in bindings.iter().enumerate() {
+        let iter_locks = recipe
+            .iterators
+            .get(iter_id)
+            .map(|it| it.slot_hold)
+            .unwrap_or(true);
+        for &card_id in binding_row.iter() {
+            if card_id == 0 {
+                continue;
+            }
+            if !seen.insert(card_id) {
+                return Err(format!("card {card_id} appears more than once in bindings"));
+            }
+            let card = store
+                .card_at(card_id, now_ms)
+                .ok_or_else(|| format!("card {card_id} not found"))?;
+            if card.flags_state & st.dead != 0 {
+                return Err(format!("card {card_id} is dead"));
+            }
+            if count_of(card.flags_bk, bk.slot_hold_count) > 0 {
+                return Err(format!(
+                    "card {card_id} is exclusively held by another in-flight action"
+                ));
+            }
+            if iter_locks && count_of(card.flags_bk, bk.slot_share_count) > 0 {
+                return Err(format!(
+                    "card {card_id} is shared-held by another in-flight action; cannot claim"
+                ));
+            }
+            if count_of(card.flags_bk, bk.touch_count) >= TOUCH_COUNT_CLIENT_CAP {
+                return Err(format!(
+                    "card {card_id} has too many concurrent in-flight actions (cap {TOUCH_COUNT_CLIENT_CAP})"
+                ));
+            }
+            let owner_player = owning_player(store, card_id, now_ms).unwrap_or(WORLD_PLAYER_ID);
+            if owner_player != caller_player_id && owner_player != WORLD_PLAYER_ID {
+                return Err(format!(
+                    "card {card_id} is owned by player {owner_player}, not caller {caller_player_id}"
+                ));
+            }
+            if card.flags_state & st.magnetic != 0 {
+                let def = decode_definition(card.packed_definition)
+                    .map_err(|e| format!("decode def for magnetic check: {e}"))?
+                    .ok_or_else(|| format!("card {card_id} has unknown def"))?;
+                let expected = lifecycle_recipe_for_def(def)
+                    .map_err(|e| format!("magnetic recipe lookup: {e}"))?
+                    .ok_or_else(|| {
+                        format!(
+                            "card {card_id} carries magnetic flag but def declares no magnetic recipe"
+                        )
+                    })?;
+                if expected != recipe_id {
+                    return Err(format!(
+                        "card {card_id} is magnetic-locked to recipe {expected}, got {recipe_id}"
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -424,5 +607,80 @@ mod tests {
         let view2 = CardView { flags_bk: clear, ..view };
         assert!(!micro_is_card(&view2));
         assert_eq!(stack_branch(&view2), 0);
+    }
+
+    use crate::recipe_tape::{AnchorSet, Recipe};
+    use std::collections::HashMap;
+
+    struct Mock(HashMap<u32, CardView>);
+    impl CardStore for Mock {
+        fn card_at(&self, id: u32, _t: u64) -> Option<CardView> {
+            self.0.get(&id).cloned()
+        }
+    }
+    fn card(id: u32, owner: u32, flags_state: u32, flags_bk: u32) -> CardView {
+        CardView {
+            card_id: id,
+            owner_id: owner,
+            micro_location: 0,
+            macro_zone: 0,
+            packed_definition: 0,
+            flags_state,
+            flags_bk,
+        }
+    }
+    fn empty_recipe() -> Recipe {
+        Recipe {
+            id: "t".to_string(),
+            input: vec![],
+            output: vec![],
+            iterators: vec![],
+            anchors: AnchorSet {
+                root: false,
+                branches: 0,
+            },
+            root_slot_hold: false,
+            root_position_hold: false,
+        }
+    }
+
+    #[test]
+    fn bindings_world_owned_ok() {
+        // owner_id 0 → resolves to WORLD_PLAYER_ID, allowed for any caller.
+        let mut m = HashMap::new();
+        m.insert(50, card(50, 0, 0, 0));
+        let store = Mock(m);
+        validate_bindings(&store, &empty_recipe(), 1, 0, &[vec![50]], 7, 0).expect("ok");
+    }
+
+    #[test]
+    fn bindings_dup_rejected() {
+        let mut m = HashMap::new();
+        m.insert(50, card(50, 0, 0, 0));
+        let store = Mock(m);
+        let err =
+            validate_bindings(&store, &empty_recipe(), 1, 0, &[vec![50, 50]], 7, 0).unwrap_err();
+        assert!(err.contains("more than once"), "{err}");
+    }
+
+    #[test]
+    fn bindings_dead_rejected() {
+        let st = state_layout();
+        let mut m = HashMap::new();
+        m.insert(50, card(50, 0, st.dead, 0));
+        let store = Mock(m);
+        let err = validate_bindings(&store, &empty_recipe(), 1, 0, &[vec![50]], 7, 0).unwrap_err();
+        assert!(err.contains("is dead"), "{err}");
+    }
+
+    #[test]
+    fn bindings_foreign_owner_rejected() {
+        // card owned by player 9 (is_owned_by_player set, owner_id = 9), caller 7.
+        let st = state_layout();
+        let mut m = HashMap::new();
+        m.insert(50, card(50, 9, st.is_owned_by_player, 0));
+        let store = Mock(m);
+        let err = validate_bindings(&store, &empty_recipe(), 1, 0, &[vec![50]], 7, 0).unwrap_err();
+        assert!(err.contains("owned by player 9"), "{err}");
     }
 }

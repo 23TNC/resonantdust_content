@@ -149,21 +149,42 @@ pub fn valid_at_time(v: u64) -> u64 {
 
 // ---- card_id -----------------------------------------------------------
 //
-// A `card_id` is a u32 partitioned `[ data_shard:u12 (31-20) | local:u20 (19-0) ]`.
-// The high 12 bits name the `cards` shard that owns the card (0..4095); the low
-// 20 bits are a per-shard local counter (0..1_048_575, locals 0..1023 reserved —
-// see `cards::FIRST_CARD_ID`). The gateway routes a card to its `cards` database
-// purely by `card_shard_of(id)` — no index lookup. A card row's `data_shard`
-// column always equals `card_shard_of(card_id)`.
+// A `card_id` is a u32 partitioned `[ db:1 (31) | shard:11 (30-20) | local:20 (19-0) ]`.
+// The top bit names the DATABASE the card lives in: `0` = `cards` (owner-sharded
+// real cards), `1` = `regions` (position-sharded tile-cards). The next 11 bits
+// name the shard WITHIN that database (0..2047); the low 20 bits are a per-shard
+// local counter (0..1_048_575, locals 0..1023 reserved — see `cards::FIRST_CARD_ID`).
+// The gateway routes a card to its database + shard purely from the id, no index.
+// (Adding a third database later — e.g. souls — takes another bit, halving the
+// shard counts; we won't approach 2048 shards in practice.)
 
 /// Width of the per-shard local-id field within a `card_id`.
 pub const CARD_LOCAL_BITS: u32 = 20;
 /// Mask selecting the local-id field (low 20 bits).
 pub const CARD_LOCAL_MASK: u32 = (1 << CARD_LOCAL_BITS) - 1;
-/// Largest `data_shard` a `card_id` can name (the 12-bit high field).
-pub const CARD_SHARD_MAX: u16 = ((1u32 << (32 - CARD_LOCAL_BITS)) - 1) as u16;
+/// Bit position of the database selector (top bit of the former 12-bit shard field).
+pub const CARD_DB_SHIFT: u32 = 31;
+/// Largest shard id WITHIN a database (the 11-bit shard field): 2047.
+pub const CARD_SHARD_MAX: u16 = ((1u32 << (CARD_DB_SHIFT - CARD_LOCAL_BITS)) - 1) as u16;
 
-/// The `cards` shard that owns `card_id` (high 12 bits).
+/// Database selector: the owner-sharded `cards` database (real cards).
+pub const CARD_DB_CARDS: u8 = 0;
+/// Database selector: the position-sharded `regions` database (tile-cards).
+pub const CARD_DB_REGIONS: u8 = 1;
+
+/// Which database holds `card_id` — [`CARD_DB_CARDS`] (0) or [`CARD_DB_REGIONS`] (1).
+pub fn card_db_of(card_id: u32) -> u8 {
+    ((card_id >> CARD_DB_SHIFT) & 1) as u8
+}
+
+/// The shard id of `card_id` WITHIN its database (the 11-bit shard field, 0..2047).
+pub fn card_shard_within_db(card_id: u32) -> u16 {
+    ((card_id >> CARD_LOCAL_BITS) & (CARD_SHARD_MAX as u32)) as u16
+}
+
+/// The full 12-bit shard field (db bit + shard): `0..2047` = cards, `2048..4095`
+/// = regions. Routing uses [`card_db_of`] + [`card_shard_within_db`]; this is the
+/// raw field, kept for reference and stable ordering.
 pub fn card_shard_of(card_id: u32) -> u16 {
     (card_id >> CARD_LOCAL_BITS) as u16
 }
@@ -173,10 +194,12 @@ pub fn card_local_of(card_id: u32) -> u32 {
     card_id & CARD_LOCAL_MASK
 }
 
-/// Build a `card_id` from a shard id and a per-shard local id. `shard` is
-/// masked to 12 bits, `local` to 20.
-pub fn pack_card_id(shard: u16, local: u32) -> u32 {
-    (((shard as u32) & (CARD_SHARD_MAX as u32)) << CARD_LOCAL_BITS) | (local & CARD_LOCAL_MASK)
+/// Build a `card_id` from a database selector (`CARD_DB_CARDS`/`CARD_DB_REGIONS`),
+/// a per-database shard id (0..2047), and a per-shard local id. Fields are masked.
+pub fn pack_card_id(db: u8, shard: u16, local: u32) -> u32 {
+    (((db as u32) & 1) << CARD_DB_SHIFT)
+        | (((shard as u32) & (CARD_SHARD_MAX as u32)) << CARD_LOCAL_BITS)
+        | (local & CARD_LOCAL_MASK)
 }
 
 // ---- macro_zone --------------------------------------------------------
@@ -836,23 +859,36 @@ mod tests {
     }
 
     #[test]
-    fn card_id_shard_roundtrip() {
-        // shard in the high 12 bits, local in the low 20.
-        let id = pack_card_id(0, 1024);
+    fn card_id_db_shard_roundtrip() {
+        // db (top bit), shard (11 bits), local (low 20).
+        let id = pack_card_id(CARD_DB_CARDS, 0, 1024);
+        assert_eq!(card_db_of(id), CARD_DB_CARDS);
+        assert_eq!(card_shard_within_db(id), 0);
         assert_eq!(card_shard_of(id), 0);
         assert_eq!(card_local_of(id), 1024);
 
-        let id = pack_card_id(7, 1_048_575);
+        // cards shard 7.
+        let id = pack_card_id(CARD_DB_CARDS, 7, 1_048_575);
+        assert_eq!(card_db_of(id), CARD_DB_CARDS);
+        assert_eq!(card_shard_within_db(id), 7);
         assert_eq!(card_shard_of(id), 7);
         assert_eq!(card_local_of(id), 1_048_575);
 
-        // Max shard, and field masking.
-        let id = pack_card_id(CARD_SHARD_MAX, CARD_LOCAL_MASK);
-        assert_eq!(id, u32::MAX);
-        assert_eq!(card_shard_of(id), CARD_SHARD_MAX);
-        assert_eq!(CARD_SHARD_MAX, 4095);
+        // regions tile-card: db bit set → the 12-bit field is 2048 + shard.
+        let id = pack_card_id(CARD_DB_REGIONS, 3, 42);
+        assert_eq!(card_db_of(id), CARD_DB_REGIONS);
+        assert_eq!(card_shard_within_db(id), 3);
+        assert_eq!(card_shard_of(id), 2048 + 3);
+        assert_eq!(card_local_of(id), 42);
 
-        // The WORLD sentinel (0) decodes to shard 0, local 0.
+        // Max fields → u32::MAX (db=1, shard=2047, local=0xFFFFF).
+        let id = pack_card_id(CARD_DB_REGIONS, CARD_SHARD_MAX, CARD_LOCAL_MASK);
+        assert_eq!(id, u32::MAX);
+        assert_eq!(card_shard_within_db(id), CARD_SHARD_MAX);
+        assert_eq!(CARD_SHARD_MAX, 2047);
+
+        // The WORLD sentinel (0) decodes to the cards DB, shard 0, local 0.
+        assert_eq!(card_db_of(0), CARD_DB_CARDS);
         assert_eq!(card_shard_of(0), 0);
         assert_eq!(card_local_of(0), 0);
     }

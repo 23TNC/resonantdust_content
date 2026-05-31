@@ -36,6 +36,7 @@
 //!                   reads textures.
 
 pub mod packed;
+pub mod card_model;
 pub mod definition_core;
 pub mod biome_core;
 pub mod recipe_core;
