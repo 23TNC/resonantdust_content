@@ -1,5 +1,22 @@
 # content/
 
+> **CURRENT DIRECTION (2026-06): game content is a stack-VM DSL.**
+> The live, authored content now lives under [`data/`](data/) as `*.rd` programs
+> — cards, recipes, aspects, functions, assets, manifests, biomes — specified in
+> [`data/SYNTAX.txt`](data/SYNTAX.txt) (sigils + ops) and
+> [`data/CONVENTIONS.txt`](data/CONVENTIONS.txt) (slot / aspect / chain model).
+> It is interpreted by the **shared VM** in [`../wasm/`](../wasm/AGENTS.md) and
+> **loaded at runtime** — changing content needs no recompile. Validate the whole
+> corpus with `bin/wasm corpus`.
+>
+> **Everything below this line documents the LEGACY system** — the JSON catalogs
+> and the `resonantdust-content` crate (`include_str!`-embedded, with recipe
+> logic mirrored in TypeScript). That path is being retired as the DSL/VM takes
+> over. Read it to understand the old engine, but **author new content under
+> `data/` against the DSL**, not under the JSON trees below.
+
+---
+
 Shared game content — JSON catalogs **and** the Rust crate (`resonantdust-content`)
 that parses them, consumed by both the SpacetimeDB server (Rust) and the
 pixijs client (TypeScript via wasm-pack). Anything that defines what cards

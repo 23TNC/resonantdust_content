@@ -1,0 +1,102 @@
+; Game conventions that the DSL paths encode. SYNTAX.txt covers tokens; this
+; covers what the tokens MEAN, so the editor (and us) can highlight by role.
+
+==============================================================================
+STACKS & ROOTS
+==============================================================================
+
+Every chain hangs off one root card. A root currently exposes three stacks:
+
+    stack 0  HEX     the tile / hex slot under the root  (STACK_DIRECTION HEX)
+    stack 1  TOP     grows upward from the root          (STACK_DIRECTION UP)
+    stack 2  BOTTOM  grows downward from the root        (STACK_DIRECTION DOWN)
+
+So the first number after `slot` is the STACK selector (0|1|2), not a free
+index. The root itself may be promoted into a stack at offset 0 — a recipe
+reference to `slot.<stack>.0` can resolve to the root card.
+
+==============================================================================
+THE SLIDING FRAME  —  slot.a.b
+==============================================================================
+
+`slot` is the recipe's entry point: a recipe pattern is written against
+`slot.<stack>.<offset>` coordinates, and the matcher slides that frame along
+each stack looking for a window where the pattern holds.
+
+    slot.a.b   ==   root[a][b + N]   for some N in 0 .. len(root[a])
+
+  - a = stack       (0 hex / 1 top / 2 bottom)
+  - b = offset      position WITHIN the recipe's frame, not an absolute index
+  - N = frame base  chosen by the matcher as it slides the window
+
+This is why `slot` is special: it is NOT root and NOT an absolute address. It
+is a sliding offset from root. `slot.1.0` = "top stack, first card of the
+current frame"; the same recipe matches anywhere the frame can sit.
+
+`root` (as a path anchor) refers to the chain root directly — no sliding.
+
+==============================================================================
+PATH ANATOMY
+==============================================================================
+
+A path is dot-separated segments. Segments fall into distinct ROLES:
+
+  anchor       leading segment that picks the address space:
+                 slot   sliding recipe frame (followed by a stack.offset pair)
+                 root   the chain anchor, absolute
+                 var    engine scratch register     (var.<n>)
+                 sys    engine-provided field        (sys.duration)
+                 aspect aspect namespace of the current card
+                 objects / color / asset / shape / biome  card-instance data
+
+  coord pair   the `<stack>.<offset>` immediately after `slot`
+                 stack  = 0|1|2 (constrained enum: hex/top/bottom)
+                 offset = frame-relative index
+
+  hop          a segment that re-anchors the path onto ANOTHER card:
+                 owner  walk to the card that owns the current one, then the
+                        rest of the path is resolved in THAT card's space
+                        (e.g. slot.1.0.owner.slot.1.0 — actor's own top stack)
+                 inventory / blueprint  container destinations for `create`
+
+  field        a named leaf that reads a property, not a child collection:
+                 def_id  the card's definition key
+                 style   render direction / style
+                 (and aspect names: aspect.wood, aspect.corpus+, ...)
+
+  index        a numeric segment that is an array/collection index rather than
+               a stack coordinate: objects.0, var.0, asset.<n>
+
+  interp       a value reference embedded inside a path as a dynamic index:
+                 objects.*var.0   →  objects[ value of var.0 ]
+                 aspect.*var.2    →  aspect indexed by var.2
+
+==============================================================================
+ASPECTS
+==============================================================================
+
+The trailing non-numeric segment of an aspect path is the aspect NAME
+(slot.0.0.aspect.stone → stone). Satisfaction is a `satisfies` LUT, not a tree
+(content/data/aspect/01.rd): each aspect lists the aspects it satisfies, so
+`pine → [wood]` (and an aspect can satisfy several). A predicate `aspect.Q`
+folds over a card: sum every stocked aspect A where A==Q or Q ∈ satisfies(A) —
+so a tile with `pine:2` + `ash:3` reads `aspect.wood` = 5. Exact match is
+implicit (no aspect lists itself). The gate computes the transitive closure +
+sum and writes the rolled-up key into the operating-set frame; the VM reads it
+as a plain key. Polarity suffixes `+` / `-` are part of the name (corpus+).
+
+==============================================================================
+HIGHLIGHTING IMPLICATIONS
+==============================================================================
+
+The editor highlights references with a deliberately simple two-part split,
+rather than coloring every role above (which read as noise):
+
+  HEAD  the sigil + path up to the last `.` (or to whitespace if no dot),
+        colored by the SIGIL so $ / & / * reads are distinguishable at a glance.
+  TAIL  the segment after the last `.` — the aspect / asset / variable being
+        edited — in its own color. A dotless path, or one whose final segment
+        is a number (slot.1.0), is all head.
+
+The roles above (anchor, coord pair, hop, interp) still describe what the head
+MEANS; they are just not individually colored.

@@ -1,0 +1,95 @@
+Reference sigils (lead a reference; pick resolution mode):
+$ Resolve a global symbol  ($card::corpus, $object::symbols:corpus, $functions:ring_objects).
+& Writable slot reference   (&aspect.cost, &objects.0).
+* Read / deref              (*biome.humidity, *slot.1.0.def_id).
+: Local label reference     (:loop) — resolves in the current scope, stops at < / :: / @.
+^ System call — an engine-native function invoked with `call` (^biome, ^seed). The FFI
+  boundary to native code not expressed in the DSL; must be deterministic so server
+  and client agree. Re-derives on each call (e.g. ^biome regenerates terrain context).
+# Hex color literal.
+; Line comment, to end of line.
+
+Path separators (compose freely; each marks its hop kind):
+:: Definition / lookup key  | : tag (facet, function, label) | . member.
+  e.g. $card::corpus:data.aspect.corpus+  — namespace card, def corpus, facet
+  data, member aspect.corpus+. A local &aspect.corpus+ is the relative tail.
+
+Header sigils (a lone `name>` line; nesting is by indentation):
+<  Bucket / compile-time export. `<card>` / `<recipe>` hold `::` defs; each global
+   function is its own scope, `<functions:ring_objects>`, holding a code body.
+:: Stored definition record (the lookup key). Cards hold `:data>` / `:visuals>`
+   facets (`:data` is shared simulation state on BOTH runtimes — server
+   authoritative, client uses it for local recipe matching; `:visuals` is
+   client-only presentation, and may read `:data`); recipes hold `@input>` /
+   `@output>`. A single-facet card may inline: `::aether:visuals>`.
+:  Structural facet (`:data>` / `:visuals>`), holding hooks. (Inside a code body
+   a `:<name>>` line is a jump label instead.)
+@  Code hook: @define>, @init>, @update>, @input>, @output>.
+
+if  Execute the next operation when the condition is true.
+!if Execute the next operation when the condition is false.
+
+goto Transfer execution to a label.
+call Invoke a function ($functions:x) or system call (^x); pushes the callee's return
+     value onto the stack. Consume it (`… &slot set`) or discard it (`… drop`).
+ret  Return one value from the current function: `<val> ret` (use `0 ret` for void).
+drop Discard the top stack value (e.g. an unused call return).
+
+count Push the number of entries in an array/map/object collection.
+key   Push the key (name) at a positional index of a map: &map <i> key. The complement
+      of positional value reads (*map.*i), so a keyed map can be iterated by index and
+      the name recovered at each step.
+recall Look up a catalog record by computed id: <id> <namespace> recall → the <ns>::<id>
+      record (or 0 if none). e.g. `*name aspect recall` → that aspect's record. The
+      explicit registry lookup — id + namespace on the stack, not an instance path.
+
+set Store a value into a slot.
+array Initialize a zeroed collection reference with the given slot count.
+
+destroy Destroy an object.
+create Create an object in a container.
+
+borrow Borrow an object for recipe execution.
+use    Use an object for recipe execution.
+claim  Claim an object for recipe execution.
+share  Share an object for recipe execution.
+
+stock Set a slot's bit width and mark it a variable aspect: <bits> &slot stock. (Value set later via range + normalize; no `set` needed here.) Static aspects need no declaration — just <value> &slot set.
+
+eq Return true when two values are equal.
+ne Return true when two values are not equal.
+gt Return true when the left value is greater than the right value.
+ge Return true when the left value is greater than or equal to the right value.
+lt Return true when the left value is less than the right value.
+le Return true when the left value is less than or equal to the right value.
+
+and Return true when both values are true.
+or Return true when either value is true.
+not Invert a boolean value.
+
+within Return true when a value falls within a range.
+range  Sets the minimum and maximum values for a slot.
+vec2   Set a 2-component vector as {x, y}: <x> <y> &slot vec2. Read via *slot.x / *slot.y.
+       Used for anchor (pivot) and object positions. e.g. `50 75 &anchor vec2`.
+
+inc Increment a numeric reference by 1.
+dec Decrement a numeric reference by 1.
+
+add Add two values.
+sub Subtract the right value from the left value.
+mul Multiply two values.
+div Divide the left value by the right value.
+
+mod Return the remainder after division.
+random Deterministic pseudo-random from a seed: <seed> random -> a hash of the seed. Same seed always yields the same value, so server and client agree (safe in @init). Range it with mod (<seed> random <n> mod); vary per pick by mixing a counter into the seed (<seed> <i> add random).
+normalize Scale a numeric input into a slot's min/max range and write it: &slot <input> normalize.
+
+rtl Constant representing right-to-left direction.
+ltr Constant representing left-to-right direction.
+
+@define> Execute when a definition is loaded.
+@init>   Execute when an instance is created.
+@update> Execute during updates.
+
+@input>  Define recipe matching requirements.
+@output> Define recipe execution behavior.
