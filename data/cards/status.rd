@@ -18,6 +18,7 @@
     :data>
       @define>
         event &aspect.type set
+        1 &aspect.stack_joins set
     :visuals>
       @define>
         $shape.hex &shape set
@@ -29,6 +30,7 @@
     :data>
       @define>
         event &aspect.type set
+        1 &aspect.stack_joins set
         $recipe::despair_success &magnetic.recipe set   ; FLAG magnetic has no op — guessed slot set
         60000 &magnetic.duration set                     ; FLAG magnetic duration_ms
     :visuals>
@@ -42,6 +44,7 @@
     :data>
       @define>
         event &aspect.type set
+        1 &aspect.stack_joins set
         $recipe::strike_success &magnetic.recipe set    ; FLAG magnetic has no op — guessed slot set
         60000 &magnetic.duration set                     ; FLAG magnetic duration_ms
     :visuals>

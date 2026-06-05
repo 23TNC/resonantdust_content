@@ -197,6 +197,15 @@
   ::type>
     @define>
       traits &section set
+  ; Stacking bit-fields (bit i = stack i: 0 hex/under, 1 top, 2 bottom).
+  ; stack_hosts = stacks this card sources as root; stack_joins = stacks it can
+  ; occupy. Absent => client default (regular card: hosts 0b111, joins 0b110).
+  ::stack_hosts>
+    @define>
+      traits &section set
+  ::stack_joins>
+    @define>
+      traits &section set
   ::cost>
     @define>
       traits &section set

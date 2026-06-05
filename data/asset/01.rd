@@ -34,7 +34,7 @@
     @define>
       $manifest::flora &object set
       128 &size set
-      50 80 &scale range
+      50 70 &scale range
 
   ::soul>
     @define>

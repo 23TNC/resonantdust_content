@@ -20,6 +20,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         10 &aspect.cost set
     :visuals>
       @define>
@@ -32,6 +33,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         10 &aspect.cost set
     :visuals>
       @define>
@@ -44,47 +46,64 @@
   ::forest>
     :data>
       @define>
+        ; only TWO stock slots store per tile (packed u16 = def|stock0|stock1),
+        ; mapped positionally to these declarations. Forest carries pine+flora;
+        ; a 3rd aspect (e.g. stone) could never be stored or rendered, so don't
+        ; declare one. Stone is a mountain/desert aspect, not a forest one.
         2    &aspect.pine stock
         2    &aspect.flora stock
-        2    &aspect.stone stock
         tile &aspect.type set
+        1 &aspect.stack_joins set
         30   &aspect.cost set
       @init>
+        ; stock = scatter (band-relative count + ±1 jitter), NOT normalize.
+        ; normalize mapped the absolute 0..100 axis into the range, so a narrow
+        ; climate band floored every tile to one bucket (forests were all
+        ; pine=2). scatter maps `input` from the band [lo,hi] onto the range,
+        ; rounds, and jitters by ^seed — so neighbours differ but wetter ground
+        ; trends denser. Each tier ranges only the aspects it grows; an unranged
+        ; aspect stays 0 (no trees off-band). pine uses *seed, flora *seed+7 so
+        ; their jitter is decorrelated.
         ^biome call &biome set
+        ^seed call &seed set
 
         *biome.rarity 0 10 within !if :r10 goto
-        *biome.humidity 65 85 within if 0 1 &aspect.pine range
-        *biome.humidity 40 85 within if 0 2 &aspect.flora range
-        :norm goto
+          0 1 &aspect.pine  range
+          &aspect.pine  *biome.humidity 65 85 *seed scatter
+          0 2 &aspect.flora range
+          &aspect.flora *biome.humidity 40 85 *seed 7 add scatter
+          0 ret
 
         :r10>
         *biome.rarity 10 20 within !if :r20 goto
-        *biome.humidity 75 95 within if 0 3 &aspect.pine range
-        0 1 &aspect.flora range
-        :norm goto
+          0 3 &aspect.pine  range
+          &aspect.pine  *biome.humidity 75 95 *seed scatter
+          0 1 &aspect.flora range
+          &aspect.flora *biome.humidity 40 85 *seed 7 add scatter
+          0 ret
 
         :r20>
         *biome.rarity 20 30 within !if :def goto
-        *biome.elevation 45 75 within if 0 3 &aspect.stone range
-        *biome.humidity 55 80 within if 0 2 &aspect.flora range
-        :norm goto
+          0 3 &aspect.pine  range
+          &aspect.pine  *biome.humidity 55 90 *seed scatter
+          0 2 &aspect.flora range
+          &aspect.flora *biome.humidity 55 80 *seed 7 add scatter
+          0 ret
 
         :def>
-        *biome.humidity 55 75 within if 0 3 &aspect.pine range
-        *biome.humidity 50 80 within if 0 1 &aspect.flora range
-
-        :norm>
-        &aspect.pine *biome.humidity normalize
-        &aspect.flora *biome.humidity normalize
-        &aspect.stone *biome.elevation normalize
+        0 3 &aspect.pine  range
+        &aspect.pine  *biome.humidity 55 75 *seed scatter
+        0 1 &aspect.flora range
+        &aspect.flora *biome.humidity 50 80 *seed 7 add scatter
     :visuals>
       @define>
-        $shape.hex &shape set
         #395C39 &color.bg set
         #2A2A2A &color.title set
         #0B1426 &color.text set
+      @init>
+        $functions::ring_prims call drop
       @update>
-        $functions:ring_objects call drop
+        $functions::ring_prims call drop
 
   ::plains>
     :data>
@@ -92,6 +111,7 @@
         2 &aspect.flora stock
         2 &aspect.berry stock
         tile &aspect.type set
+        1 &aspect.stack_joins set
         5 &aspect.cost set
       @init>
         ^biome call &biome set
@@ -127,7 +147,7 @@
         #0b1426 &color.title set
         #0b1426 &color.text set
       @update>
-        $functions:ring_objects call drop
+        $functions::ring_objects call drop
 
   ::desert>
     :data>
@@ -176,7 +196,7 @@
         #0b1426 &color.title set
         #0b1426 &color.text set
       @update>
-        $functions:ring_objects call drop
+        $functions::ring_objects call drop
 
   ::mountain>
     :data>
@@ -185,6 +205,7 @@
         1 &aspect.flora stock
         2 &aspect.metal stock
         tile &aspect.type set
+        1 &aspect.stack_joins set
         15 &aspect.cost set
       @init>
         ^biome call &biome set
@@ -222,12 +243,13 @@
         #0b1426 &color.title set
         #0b1426 &color.text set
       @update>
-        $functions:ring_objects call drop
+        $functions::ring_objects call drop
 
   ::building_nd_furnace>
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         2 &aspect.fire stock
         50 &aspect.cost set
     :visuals>
@@ -243,6 +265,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         2 &aspect.fire stock
         50 &aspect.cost set
     :visuals>
@@ -258,6 +281,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         1 &aspect.level set
         50 &aspect.cost set
     :visuals>
@@ -274,6 +298,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         1 &aspect.anima set
         50 &aspect.cost set
     :visuals>
@@ -290,6 +315,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         1 &aspect.aether set
         50 &aspect.cost set
     :visuals>
@@ -306,6 +332,7 @@
     :data>
       @define>
         tile &aspect.type set
+        1 &aspect.stack_joins set
         30 &aspect.cost set
     :visuals>
       @define>

@@ -157,12 +157,21 @@
         requisite &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set     ; generic PrimList path (LayoutGenericCard)
         #8B5E3C &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::requisite:axe &objects.0 set
+        ; resolve the art: requisite pack, `axe` variant. *pack.object → the
+        ; manifest folder, *pack.texture.axe → the variant index (7). rect_card
+        ; reads &art.{texture,index}. (No `$asset::pack:variant` tag — the tag
+        ; form doesn't deref; the pack ref + .texture.<v> member does.)
+        $asset::requisite &pack set
+        *pack.object       &art.texture set
+        *pack.texture.axe  &art.index set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
 
   ::pickaxe>
     :data>
