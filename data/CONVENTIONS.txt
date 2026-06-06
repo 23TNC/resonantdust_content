@@ -45,7 +45,9 @@ A path is dot-separated segments. Segments fall into distinct ROLES:
                  slot   sliding recipe frame (followed by a stack.offset pair)
                  root   the chain anchor, absolute
                  var    engine scratch register     (var.<n>)
-                 sys    engine-provided field        (sys.duration)
+                 sys    engine-provided field        (sys.duration; in :visuals
+                        also sys.label / sys.type / sys.key — the card's identity,
+                        seeded before the hook for locale-keyed text)
                  aspect aspect namespace of the current card
                  objects / color / asset / shape / biome  card-instance data
 
@@ -97,10 +99,10 @@ eases each toward the values you set. The DSL only ever writes TARGET values; th
 engine owns the live objects + the tween, so you never hold a sprite -- you
 construct one and describe it.
 
-    ^hex call   &h set        ; engine pushes a hex onto prims, returns a handle
-    0.0 0.0     &h.pos  vec2   ; &h.<field> writes THROUGH to that prim
-    100.0 100.0 &h.size vec2
-    *color.bg   &h.tint set
+    ^hex call &h set                                       ; push a hex, get a handle
+    0.0 0.0 &h.pos vec2                                     ; &h.<field> writes THROUGH
+    $globals::hex_width $globals::hex_height &h.size vec2   ; px, from globals
+    *color.bg &h.tint set
 
 `&h` is a reference to the prim just pushed; reuse the name for the next one
 (`^sprite call &h set`). Push order IS paint/reconcile order -- no index
@@ -108,20 +110,57 @@ bookkeeping. (`prims` exists because `^` filled it; the engine never scans for a
 magic variable, and you never write `&prims.0.kind`.)
 
 Kinds are `^` engine intrinsics (NOT a `$` registry): ^rect | ^hex | ^text |
-^sprite. The engine (`vm::PRIM_KINDS`) + the client `makePrimitive` own the
-matching set.
+^sprite | ^progress. The engine (`vm::PRIM_KINDS`) + the client `makePrimitive`
+own the matching set. `^progress` is a self-contained bar (dim track + fill). The
+DSL sets `target` (WHICH progress row to track) + `style`, NOT a fill value — it
+doesn't run per-frame. The engine resolves `target` to the row's timing and fills
+the bar live, hiding it when the progress ends ("the engine handles the reset").
 Fields (all optional; the kind is fixed by the `^` constructor):
-  pos size anchor vec2, CARD-SPACE 0..100 (0 = left/top edge, 100 = right/bottom;
-                  anchor is the 0..100 pivot). The client scales by the card's
-                  pixel box x dpr -- so one spec is correct at any size / density.
-  scale rot alpha floats (defaults 1 / 0 / 1).
+  pos size       vec2, in PIXELS — sourced from `$globals` (card_width/height,
+                  hex_width/height, title_height) and asset px (`*rec.art.size`).
+                  No box normalization: a fill is `$globals::card_width
+                  $globals::card_height`, an object is its asset px. The DSL owns
+                  every dimension; nothing is hardcoded engine-side.
+  anchor         vec2, a 0..100 PIVOT (50,50 = centre) — a fraction, not px.
+  scale rot alpha floats (defaults 1 / 0 / 1). `scale` is the multiplier (per-
+                  instance variance, zoom); `size` is the base px. They're
+                  distinct — call `scale` when you mean relative.
   tint            #rrggbb (for a rect/hex fill this IS the colour: white texture
                   x tint).
   texture         a bare asset / render-object NAME (rect/hex fill image, or the
                   sprite art). The CLIENT picks the LOD variant + faction -- the
                   definition just names the thing.
   text            a LOCALE KEY. The client resolves it via the locale runtime;
-                  definitions never decode locales (locales = key->string).
+                  definitions never decode locales (locales = key->string). For a
+                  card title use `*sys.label` (= `cards.<type>.<key>.label`, seeded
+                  by the engine) — `$functions::title` does exactly this, and
+                  rect_card / hex_card call it so every card face is titled. The
+                  client bakes ONE bitmap font and SCALES the node to `size.y` px
+                  (no per-size/zoom re-rasterization); `size.y` is the text px
+                  height, `tint` the colour.
+  target          `^progress` only: the row to track (`*d.progress.<i>.id`). The
+                  engine fills from its timing; the DSL never sets a fraction.
+  style           `^progress` only: 1 = ltr, 2 = rtl. DSL-chosen (needn't come
+                  from the row).
+  source          `^progress` only: which fraction to fill from. unset/0 = a
+                  progress row (`target` → `*d.progress.<i>`); 1 = the action
+                  QUEUE/debounce countdown (the pre-propose bar). tint is the fill
+                  colour either way (e.g. #fff for the white queue bar).
+  z               intra-card paint order (`&h.z set`); higher draws on top. Unset
+                  → push order (so a `title` emitted last stays on top for free).
+                  This is the prim's z WITHIN its card only — a card's z in its
+                  stack is the container's, set client-side from the chain (the
+                  two sorts nest, they don't share a scale). So you order a card's
+                  own prims here; you never reach across cards.
+
+E.g. a progress bar on a card title — set target + style; the engine fills it:
+    ^card_data call &d set
+    ^progress call &p set
+    0.0 0.0 &p.pos vec2
+    $globals::card_width $globals::title_height &p.size vec2
+    #6cf &p.tint set
+    *d.progress.0.id    &p.target set
+    *d.progress.0.style &p.style set
 
 Hooks: build the prims in `@init` (first draw -- the client snaps current=target)
 and/or `@update` (a change -- the client eases to the new targets). Both run the
@@ -129,6 +168,15 @@ same builder; the VM emits the full list each time and the client diffs by index
 Conditional elements toggle via `alpha 0`, never by adding/removing a record (the
 index is the identity). Genuine per-frame motion is a dedicated engine primitive,
 not DSL.
+
+`@destroy` runs when the card is dying (row `dead === 1`) — its prims are the card's
+final render before removal. Normally it just re-runs the builder (same as
+`@update`), so the card stays correctly drawn through teardown and the client then
+splices the chain + removes it in one step (no empty-frame flicker). With no
+`@destroy` hook the exit list is empty, so the card blinks out before removal —
+hence every card defines one. (You CAN ease an exit here by emitting the same
+indices/kinds at a gone state — `alpha 0`, a shrink — but that's optional; the
+default is a clean, immediate teardown.)
 
 Shared builders compose the standard sets: e.g. `ring_prims` for tiles emits the
 hex body (tint `color.bg`) plus one sprite per stock object on a trig ring, the

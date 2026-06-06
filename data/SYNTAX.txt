@@ -1,6 +1,10 @@
 Reference sigils (lead a reference; pick resolution mode):
 $ Resolve a global symbol  ($card::corpus, $object::symbols:corpus, $functions:ring_objects).
   Enum registries use `.`: $shape.rect (legacy, going away), $faction.chorus.
+  $globals::<id> resolves to a `<globals>` CONSTANT's value (card_width,
+  title_height, hex_width, …) — shared sizes the DSL + client read instead of
+  hardcoding them in engine code. Resolves to the VALUE at exec (not a deferred
+  ref); a later global can be a function of an earlier one.
 & Writable slot reference   (&aspect.cost, &objects.0).
 * Read / deref              (*biome.humidity, *slot.1.0.def_id).
 : Local label reference     (:loop) — resolves in the current scope, stops at < / :: / @.
@@ -8,8 +12,16 @@ $ Resolve a global symbol  ($card::corpus, $object::symbols:corpus, $functions:r
   boundary to native code not expressed in the DSL; must be deterministic so server
   and client agree. Re-derives on each call (e.g. ^biome regenerates terrain context).
   The visual-primitive constructors are intrinsics here: ^hex / ^rect / ^sprite /
-  ^text — `^<kind> call &h set` pushes a prim onto `prims` (engine-owned) and
-  returns a handle you configure via `&h.pos`/`&h.tint`/… (see CONVENTIONS).
+  ^text / ^progress — `^<kind> call &h set` pushes a prim onto `prims` (engine-
+  owned) and returns a handle you configure via `&h.pos`/`&h.tint`/… (see
+  CONVENTIONS). `^text` takes a locale KEY in `&h.text` (e.g. `*sys.label` for a
+  title); the client resolves + renders it.
+  ^card_data — a STRUCTURED host record of the card's runtime state (the engine
+  bundles it so the DSL needn't pass big ints): `^card_data call &d set` then
+  read nested fields — `*d.stack.state` / `*d.stack.index` (chain position),
+  `*d.loose`, overlay flags (`*d.hovered`/`*d.selected`/…), `*d.progress.<i>`.
+  Lets the DSL drive visual states (stack offsets, overlays, progress bars)
+  instead of the engine hardcoding them.
 # Hex color literal.
 ; Line comment, to end of line.
 
@@ -18,8 +30,9 @@ Number literals:
   `1.5`, `-0.25`        floats — any token containing `.` that parses as f64.
   Arithmetic & comparison PROMOTE to float when either operand is a float;
   pure-integer `div`/`mod` stay truncating (recipe math is unchanged). Visual
-  coords (pos / size / anchor / scale, card-space 0..100) and biome axes are
-  floats; ids / aspect magnitudes / stock stay integers.
+  coords (prim pos / size in PIXELS from $globals + asset px; anchor a 0..100
+  pivot; scale a multiplier) and biome axes are floats; ids / aspect magnitudes
+  / stock stay integers.
 
 Path separators (compose freely; each marks its hop kind):
 :: Definition / lookup key  | : tag (facet, function, label) | . member.
@@ -36,7 +49,7 @@ Header sigils (a lone `name>` line; nesting is by indentation):
    `@output>`. A single-facet card may inline: `::aether:visuals>`.
 :  Structural facet (`:data>` / `:visuals>`), holding hooks. (Inside a code body
    a `:<name>>` line is a jump label instead.)
-@  Code hook: @define>, @init>, @update>, @input>, @output>.
+@  Code hook: @define>, @init>, @update>, @destroy>, @input>, @output>.
 
 if  Execute the next operation when the condition is true.
 !if Execute the next operation when the condition is false.
@@ -99,6 +112,7 @@ mod Return the remainder after division.
 
 sin Sine of an angle in RADIANS: <radians> sin -> float.
 cos Cosine of an angle in RADIANS.
+sqrt Square root: <n> sqrt -> float. (e.g. `3 sqrt` for a hex cell's √3·radius.)
 pi  Push the constant π (a float). Build an angle from an index, e.g. an N-slot
     ring: `*i N.0 div 2.0 mul pi mul` = i/N · 2π; position with sin/cos.
 random Deterministic pseudo-random from a seed: <seed> random -> a hash of the seed. Same seed always yields the same value, so server and client agree (safe in @init). Range it with mod (<seed> random <n> mod); vary per pick by mixing a counter into the seed (<seed> <i> add random).
@@ -120,6 +134,9 @@ ltr Constant representing left-to-right direction.
 @define> Execute when a definition is loaded.
 @init>   Execute when an instance is created.
 @update> Execute during updates.
+@destroy> (:visuals) Execute when the instance is dying (row dead===1). Its prims
+         are the EXIT targets the client eases to, then removes the card. No
+         @destroy → empty prims → instant removal.
 
 @input>  Define recipe matching requirements.
 @output> Define recipe execution behavior.

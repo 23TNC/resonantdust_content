@@ -1,8 +1,8 @@
 ; content/data/cards/faculties.card
-; Type `faculty` (rect). Port of cards/data/status/stats.json.
-; The `corpus` faculty carries the corpus_lit aspect; _lit/_dim variants are
-; mostly face-only (some carry their matching aspect, some carry only a color).
-
+; Type `faculty` (generic rect). The corpus/aether/sollertia/anima faculties
+; carry a symbols-pack icon ($asset::symbols, variant = the faculty name); the
+; _dim/_lit/_upgrade variants are face-only (no &pack → rect_card's sprite hides
+; itself, leaving body + title).
 <card>
   ::corpus>
     :data>
@@ -11,12 +11,18 @@
         1 &aspect.corpus_lit set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #E67E7E &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::symbols:corpus &objects.0 set
+        $asset::symbols &pack set
+        corpus &variant set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::corpus_dim>
     :data>
@@ -25,10 +31,16 @@
         1 &aspect.corpus_dim set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #3a3a4a &color.bg set
         #2a2a3a &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::corpus_upgrade>
     :data>
@@ -37,10 +49,16 @@
         1 &aspect.corpus_upgrade set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #E67E7E &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::aether>
     :data>
@@ -48,12 +66,18 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #7D96E3 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::symbols:aether &objects.0 set
+        $asset::symbols &pack set
+        aether &variant set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::aether_dim>
     :data>
@@ -61,10 +85,16 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #3a3a4a &color.bg set
         #2a2a3a &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::aether_lit>
     :data>
@@ -72,10 +102,16 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #7D96E3 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::sollertia>
     :data>
@@ -83,12 +119,18 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #97e3a7 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::symbols:sollertia &objects.0 set
+        $asset::symbols &pack set
+        sollertia &variant set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::sollertia_dim>
     :data>
@@ -96,10 +138,16 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #3a3a4a &color.bg set
         #2a2a3a &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::sollertia_lit>
     :data>
@@ -107,10 +155,16 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #97e3a7 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::anima>
     :data>
@@ -118,12 +172,18 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #FFD966 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::symbols:anima &objects.0 set
+        $asset::symbols &pack set
+        anima &variant set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::anima_dim>
     :data>
@@ -131,10 +191,16 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #3a3a4a &color.bg set
         #2a2a3a &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::anima_lit>
     :data>
@@ -142,7 +208,13 @@
         faculty &aspect.type set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #FFD966 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop

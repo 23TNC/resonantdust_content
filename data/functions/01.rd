@@ -16,6 +16,16 @@
   ::title_height>
     @define>
       $globals::card_height 25 mul 100 div &value set
+  ; the BODY is the square that remains once the title strip is taken out of the
+  ; total card_height — 96 - 24 = 72, so the body is 72×72 and the card (body +
+  ; one title strip above OR below) stays 72×96.
+  ::body_height>
+    @define>
+      $globals::card_height $globals::title_height sub &value set
+  ; the queue/debounce bar — a thin strip along the title bar's body edge.
+  ::queue_height>
+    @define>
+      3 &value set
 
   ; world hex cell — pointy-top, derived from the display radius. width = √3·r,
   ; height = 2·r (matches the client HexGrid). The tile body fills these px.
@@ -29,84 +39,62 @@
     @define>
       $globals::hex_radius 2 mul &value set
 
-; Shared functions a card calls from its :visuals hooks. Two output shapes:
-;   - &objects array (legacy world path): the engine dumb-walks it and renders
-;     each entry via the decorator, reading the ASSET's size/scale/anchor.
-;   - &prims array (generic path, see CONVENTIONS "VISUAL PRIMITIVES"): a full
-;     primitive render-spec the client PrimitiveLayer reconciles. `ring_prims`
-;     is the &prims twin of `ring_objects`.
-; Either way object/placement behavior lives in the DSL, not the engine. A card
-; calls one of these, or none (custom behavior).
+; Shared functions a card calls from its `:visuals` hooks. All output the
+; engine-owned `prims` draw list (see CONVENTIONS "VISUAL PRIMITIVES"): a card
+; constructs primitives with the `^hex`/`^rect`/`^sprite` intrinsics and
+; configures them through the returned handle. The builders below compose the
+; standard faces — rect_card / hex_card (card faces), ring_prims (a tile's stock
+; scatter), tile_object (a tile's single placeable). Sizes come from `<globals>`
+; + the asset; nothing is hardcoded engine-side.
 ;
 ; `<functions>` catalogues each `::name>` function the same way `<card>`
 ; catalogues `::name>` cards — one `<>`/`::` grammar across every space, so
-; functions version like cards ($functions::ring_objects → lineage head).
+; functions version like cards ($functions::ring_prims → lineage head).
 <functions>
 
-  ; place_art — the default: one object, the card's &art asset, centered. A lone
-  ; object centers, and the asset's anchor sets the pivot, so there's nothing to
-  ; position here. A card sets `$asset::<x> &art set` then calls this; a card that
-  ; wants something else (a ring, an effect) skips it and fills &objects directly.
-  ::place_art>
-    1 &objects array
-    *art &objects.0 set
-
-  ; ring_objects — scatter each stock aspect's count as objects, pulling the sprite
-  ; from the ASPECT registry (no per-card asset list). For each aspect entry: get
-  ; its name (`key` at the index), `recall` its <aspect> record, and place
-  ; aspect[i] copies of a random texture variant of the aspect's `art` into the
-  ; next free object slots, until the array is full. Aspects with no `art`
-  ; (type/cost/resources lacking a pack) resolve to 0 textures and are skipped, so
-  ; iterating ALL aspects is fine — order no longer matters. var.0 = next free slot
-  ; (advances only on a real placement), var.2 = aspect index, var.1 =
-  ; placed-this-aspect, var.3 = chosen texture, var.4 = texture count. art ->
-  ; .object (manifest) -> :<faction> -> .texture -> [var.3] (object/texture are
-  ; literal members; faction/indices interpolate).
-  ::ring_objects>
-    7 &objects array
-    0 &var.0 set
-    0 &var.2 set
-    ^seed call &seed set
-
-    :aspect>
-      *var.2 &aspect count ge if 0 ret
-      *var.0 &objects count ge if 0 ret
-      &aspect *var.2 key &name set
-      *name aspect recall &rec set
-      *rec.art.object:*faction.texture count &var.4 set
-      *var.4 0 eq if :next goto
-      0 &var.1 set
-
-      :place>
-        *var.1 *aspect.*var.2 ge if :next goto
-        *var.0 &objects count ge if 0 ret
-        *seed *var.0 add random *var.4 mod &var.3 set
-        *rec.art.object:*faction.texture.*var.3 &objects.*var.0 set
-        &var.0 inc
-        &var.1 inc
-        :place goto
-
-      :next>
-      &var.2 inc
-      :aspect goto
-
-  ; ring_prims — the generic-path version of ring_objects. Instead of filling an
-  ; &objects array (positioned client-side by the decorator), it emits a full
-  ; &prims list the PrimitiveLayer reconciles: prims.0 = the hex tile body (tint
-  ; color.bg), then one sprite prim per stock object on an evenly-spaced ring
-  ; (trig). The sprite's texture is the aspect's render OBJECT name (`art.object`,
-  ; e.g. `manifest::pine`); the CLIENT picks the LOD variant + faction (so no
-  ; ^seed / faction deref here). Coords are card-space 0..100; ring radii (28/25)
-  ; approximate the hex bbox — tune visually. Object index var.0 (0..6) → prim
-  ; index var.5 = var.0+1.
+  ; ring_prims — a tile's stock scatter: prims.0 = the hex tile body (fills the
+  ; cell, tint color.bg), then one sprite prim per stock object dropped into one
+  ; of 7 precomputed slots (centre + a jittered 6-point ring) at random. The
+  ; sprite's texture is the aspect's render OBJECT name (`*rec.art.object`); the
+  ; CLIENT picks the LOD variant + faction by seed. Px from `$globals::hex_*`;
+  ; each object is sized by the asset's `scale` envelope. Object counter var.0
+  ; (0..6); `^seed` (the tile's (q,r) hash) drives the scatter.
   ::ring_prims>
     ; ^hex constructs the tile body prim engine-side and returns a handle (&h);
     ; we configure it through the handle. Each ^sprite likewise pushes a prim and
     ; hands back &h — push order IS paint order, so no index bookkeeping.
     ^hex call &h set
-    0.0 0.0     &h.pos vec2
-    100.0 100.0 &h.size vec2
-    *color.bg   &h.tint set
+    0.0 0.0 &h.pos vec2
+    $globals::hex_width $globals::hex_height &h.size vec2   ; body fills the cell (px)
+    *color.bg &h.tint set
+
+    ; ring geometry in PX, derived from the cell globals (constant per tile):
+    ; centre = cell/2, radii ~28%/25% of the cell width/height. var.4/5 = centre,
+    ; var.9/10 = radii.
+    $globals::hex_width 2 div &var.4 set
+    $globals::hex_height 2 div &var.5 set
+    $globals::hex_width 28 mul 100 div &var.9 set
+    $globals::hex_height 25 mul 100 div &var.10 set
+
+    ; Precompute 7 placement slots: slot 0 = centre, slots 1..6 on the ring at a
+    ; seeded start angle, each separated by 60° ± 10° of jitter (so neighbouring
+    ; tiles scatter differently and the ring never reads as a rigid hexagon).
+    ; Objects are later dropped into these slots at random, one per slot.
+    ^seed call &seed set
+    *var.4 *var.5 &slot.0 vec2
+    *seed 101 add random 360 mod &var.24 set            ; start angle 0..359°
+    *var.24 pi mul 180.0 div &var.20 set                ; → radians
+    1 &var.21 set
+    :ring>
+      *var.21 7 ge if :ring_done goto
+      *var.4 *var.9 *var.20 cos mul add &var.22 set     ; centre_x + radius_x·cos
+      *var.5 *var.10 *var.20 sin mul add &var.23 set    ; centre_y + radius_y·sin
+      *var.22 *var.23 &slot.*var.21 vec2
+      *seed *var.21 add 200 add random 21 mod 10 sub 60 add &var.24 set   ; step 50..70°
+      *var.24 pi mul 180.0 div *var.20 add &var.20 set                    ; angle += step
+      &var.21 inc
+      :ring goto
+    :ring_done>
 
     0 &var.0 set
     0 &var.2 set
@@ -117,11 +105,6 @@
       &aspect *var.2 key &name set
       *name aspect recall &rec set
       *rec.art.object 0 eq if :next goto
-      ; object size DEFAULT comes from the aspect's asset (`*rec.art.size`,
-      ; card-space % of the cell) — pine is bigger than flora because its asset
-      ; says so. A card can override by setting its own size. var.3 = this
-      ; aspect's size.
-      *rec.art.size &var.3 set
       0 &var.1 set
 
       :place>
@@ -129,12 +112,32 @@
         *var.0 7 ge if 0 ret
         ^sprite call &h set
         *rec.art.object &h.texture set
-        50.0 50.0 &h.anchor vec2
+        ; pivot from the ASSET (not a hardcoded centre) so each object controls
+        ; where the slot sits on it — e.g. a tree uses bottom-centre (50 100) so
+        ; its BASE plants on the slot and the canopy spills UP into the cell above,
+        ; rather than centring (and spilling its base into the cell below).
+        *rec.art.anchor.x *rec.art.anchor.y &h.anchor vec2
+        ; per-object scale: roll within the asset's `scale` envelope (hundredths,
+        ; e.g. pine 80..100), defaulting to 100% when the pack declares none — so a
+        ; clump of pines varies in size. Size px = native (`*rec.art.size`) · pick/100.
+        *rec.art.scale.min &var.11 set
+        *rec.art.scale.max &var.12 set
+        *var.12 0 eq if 100 &var.12 set                                      ; no envelope → native
+        *var.11 0 eq if *var.12 &var.11 set
+        *var.12 *var.11 sub 1 add &var.13 set                                ; span = max-min+1
+        *seed *var.0 add 400 add random *var.13 mod *var.11 add &var.14 set   ; pick in [min,max]
+        *rec.art.size *var.14 mul 100.0 div &var.3 set
         *var.3 *var.3 &h.size vec2
-        *var.0 7.0 div 2.0 mul pi mul &var.6 set
-        50.0 28.0 *var.6 cos mul add &var.7 set
-        50.0 25.0 *var.6 sin mul add &var.8 set
-        *var.7 *var.8 &h.pos vec2
+        ; drop into a random unused slot — linear probe forward from a seeded
+        ; start so each object lands in its own slot (≤7 objects, 7 slots).
+        *seed *var.0 add 300 add random 7 mod &var.30 set
+        :probe>
+          *used.*var.30 0 eq if :slotted goto
+          *var.30 1 add 7 mod &var.30 set
+          :probe goto
+        :slotted>
+        1 &used.*var.30 set
+        *slot.*var.30.x *slot.*var.30.y &h.pos vec2
         &var.0 inc
         &var.1 inc
         :place goto
@@ -143,32 +146,139 @@
       &var.2 inc
       :aspect goto
 
-  ; rect_card — the generic-path version of a standard rectangular card face
-  ; (the &prims twin of LayoutRectCard's body/title/art sub-layers). Emits three
-  ; prims into &prims: 0 = body fill (tint *color.bg), 1 = title-bar fill across
-  ; the top 25% (24/96 of the card height, tint *color.title), 2 = the card art
-  ; sprite (texture *objects.0 — the client resolves the asset:variant to its
-  ; folder+index), centred in the body below the title and fit to 85% of the
-  ; body box. Coords are card-space 0..100; fills anchor top-left (default),
-  ; the sprite anchors centre. A card calls this from `:visuals @init`/`@update`
-  ; after setting *color.* + *objects.0; title TEXT is not emitted yet (the VM
-  ; has no label-key slot — client chrome for now).
-  ::rect_card>
-    ^rect call   &h set       ; body fill — push order is paint order
-    0.0 0.0      &h.pos vec2
-    100.0 100.0  &h.size vec2
-    *color.bg    &h.tint set
+  ; stack_layout — read `^card_data` and set the layout vars every card builder
+  ; uses, so the stack math lives in ONE place. The body is drawn top-left at
+  ; (0, *stack_dy), height card_height; the TITLE BAR is a separate title_height
+  ; strip flush ABOVE the body (top-stack member, hex, loose root) or flush BELOW
+  ; it (bottom-stack member). The chain paints ROOT IN FRONT, root's title on top.
+  ;   &stack_dy  the card's fan y-offset (px). Units are title_height: a TOP-stack
+  ;              member offsets by its chain `step` (it must clear the root's top
+  ;              title bar); a BOTTOM member by `step-1` (nothing to clear below
+  ;              the root). dir: -1 up / +1 down / 0 hex|loose. So consecutive
+  ;              cards' title bars stack one title_height apart.
+  ;   &band_y    the title strip's top-left y (already includes *stack_dy).
+  ; `call` runs functions inline over the same store, so the vars are visible to
+  ; the caller (and to `title`).
+  ::stack_layout>
+    ^card_data call &d set
+    *d.stack.index &units set
+    *d.stack.dir 0 gt if *d.stack.index 1 sub &units set
+    *units *d.stack.dir mul $globals::title_height mul &stack_dy set
+    ; title strip top-left y: flush ABOVE the body, or BELOW for a bottom member.
+    *stack_dy $globals::title_height sub &band_y set                       ; above the body
+    *d.stack.dir 0 gt if *stack_dy $globals::body_height add &band_y set   ; below, for a bottom member
+    ; queue bar top-left y: the title bar's edge that BORDERS the body — the body's
+    ; top (title above) or the body's bottom (title below).
+    *stack_dy $globals::queue_height sub &queue_y set                      ; just inside the top title's bottom edge
+    *d.stack.dir 0 gt if *stack_dy $globals::body_height add &queue_y set  ; bottom title's top edge
 
-    ^rect call   &h set       ; title bar
-    0.0 0.0      &h.pos vec2
-    100.0 25.0   &h.size vec2
+  ; title — the card's name strip (the title BAR), placed at `*band_y` (above or
+  ; below the body — see stack_layout). Three prims in paint order:
+  ;   1. the bar background (full width × title_height, tint *color.title);
+  ;   2. the `^progress` FILL over it (the title bar IS the progress bar) — the
+  ;      engine fills it live from progress row 0 and HIDES it when none is active,
+  ;      so a card always emits it (no conditional); the DSL only names the row +
+  ;      style, never a fraction;
+  ;   3. the title TEXT, centred in the bar, on top (a locale KEY `*sys.label` =
+  ;      `cards.<type>.<key>.label`; the client resolves + bakes/scales it).
+  ; Every rect_card / hex_card titles itself from here.
+  ::title>
+    ^rect call &h set                                        ; bar background
+    ; extend 1px each side (like the body) so the two fills overlap at the seam —
+    ; closes the residual ~1px transparent line between the title bar and body.
+    0.0   *band_y 1 sub   &h.pos vec2
+    $globals::card_width   $globals::title_height 2 add   &h.size vec2
     *color.title &h.tint set
 
-    ^sprite call &h set     ; card art
-    ; texture object + variant index are resolved by the CARD into &art (it
-    ; knows its variant): &art.texture = *pack.object, &art.index = *pack.texture.<v>.
-    *art.texture &h.texture set
-    *art.index   &h.index set
-    50.0 62.5    &h.pos vec2
-    85.0 63.75   &h.size vec2
-    50.0 50.0    &h.anchor vec2
+    ^card_data call &d set                                   ; progress fill (behind the text)
+    ^progress call &p set
+    0.0 *band_y &p.pos vec2
+    $globals::card_width $globals::title_height &p.size vec2
+    #6cf &p.tint set
+    *d.progress.0.id &p.target set
+    *d.progress.0.style &p.style set
+
+    ^text call &h set                                        ; title text, on top
+    *sys.label &h.text set
+    $globals::card_width 2 div   *band_y $globals::title_height 2 div add   &h.pos vec2
+    $globals::card_width   $globals::title_height 70 mul 100 div   &h.size vec2
+    50.0 50.0 &h.anchor vec2
+    *color.text &h.tint set
+
+    ; queue bar — a thin WHITE ltr bar on the title's body-bordering edge, showing
+    ; the action QUEUE/debounce before a recipe is proposed (`source 1` = the
+    ; debounce fraction, NOT a recipe row). Engine self-hides it when no queue.
+    ^progress call &q set
+    1 &q.source set
+    0.0 *queue_y &q.pos vec2
+    $globals::card_width $globals::queue_height &q.size vec2
+    #ffffff &q.tint set
+    1 &q.style set
+
+  ; rect_card — the generic-path version of a standard rectangular card face. The
+  ; BODY is the full card box (tint *color.bg) with the art centred in it; the
+  ; title BAR is a separate strip above/below (via `$functions::title`). All
+  ; sizes/coords are PX from `$globals::card_*`. A card calls this from `:visuals
+  ; @init`/`@update`/`@destroy` after setting *color.* + its art (&pack/&variant).
+  ;
+  ; STACK FAN: `stack_layout` sets `*stack_dy` (the card's fan offset) + `*band_y`
+  ; (the title strip y). The body + art ride `*stack_dy`; the title bar + text sit
+  ; on `*band_y` (which already includes the fan).
+  ::rect_card>
+    $functions::stack_layout call drop
+
+    ^rect call &h set                                        ; body fill (the 72×72 square)
+    ; extend the body 1px on each side so it underlaps the title bar — adjacent
+    ; sprites leave a ~1px transparent seam (edge AA / atlas half-texel) otherwise.
+    ; The title (higher z) covers the overlap; centre is unchanged.
+    0.0   *stack_dy 1 sub   &h.pos vec2
+    $globals::card_width   $globals::body_height 2 add   &h.size vec2
+    *color.bg &h.tint set
+
+    ^sprite call &h set                                      ; card art, centred in the body
+    ; the card set &pack (the asset ref) and, for a variant pack, &variant (the
+    ; LUT key). Resolve here: object folder from *pack.object, variant index from
+    ; *pack.texture.*variant. A card with no &pack → no texture → the sprite hides
+    ; itself (body only).
+    *pack.object &h.texture set
+    ; pin the variant index ONLY for a variant pack (one with a texture LUT);
+    ; a single-sprite pack (souls, soul_offline) leaves index unset → the client
+    ; picks by seed (the card id), so e.g. each soul gets its own portrait.
+    *pack.texture count 0 gt if *pack.texture.*variant &h.index set
+    $globals::card_width 2 div   *stack_dy $globals::body_height 2 div add   &h.pos vec2
+    $globals::card_width 85 mul 100 div &var.0 set          ; square art ≈85% of card width
+    *var.0 *var.0 &h.size vec2
+    50.0 50.0 &h.anchor vec2
+
+    $functions::title call drop                             ; title bar strip (bg + progress + text)
+
+  ; tile_object — a hex tile with ONE explicit object (a building), no stock ring.
+  ; Hex body (tint *color.bg) + a single centred sprite from the card's &pack
+  ; (+ &variant for a variant pack), sized to the asset's native px. For tiles
+  ; whose art is a fixed placeable, not aspect-stock scatter (cf. ring_prims).
+  ::tile_object>
+    ^hex call &h set
+    0.0 0.0 &h.pos vec2
+    $globals::hex_width $globals::hex_height &h.size vec2
+    *color.bg &h.tint set
+
+    ^sprite call &h set
+    *pack.object &h.texture set
+    *pack.texture count 0 gt if *pack.texture.*variant &h.index set   ; variant packs only
+    $globals::hex_width 2 div $globals::hex_height 2 div &h.pos vec2
+    *pack.size *pack.size &h.size vec2
+    50.0 50.0 &h.anchor vec2
+
+  ; hex_card — a card-sized hex face (events). ^hex body filling the card box,
+  ; tinted *color.bg. The `^hex gives us a hex` path — same primitive forest's
+  ; tile body uses, just sized to the card box instead of the cell.
+  ::hex_card>
+    ; stack fan + title band — same as rect_card; a hex face stacks too.
+    $functions::stack_layout call drop
+
+    ^hex call &h set
+    0.0   *stack_dy 1 sub   &h.pos vec2
+    $globals::card_width   $globals::body_height 2 add   &h.size vec2
+    *color.bg &h.tint set
+
+    $functions::title call drop                             ; title bar strip (bg + progress + text)

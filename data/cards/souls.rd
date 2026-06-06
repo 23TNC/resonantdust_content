@@ -1,6 +1,8 @@
 ; content/data/cards/souls.card
-; Type `soul` (rect). Port of cards/data/souls/*.json.
-
+; Type `soul` (generic rect). Portrait = the soul pack (soul_white / soul), a
+; single-sprite pack with no variant — so rect_card leaves the index unset and
+; the client picks the portrait by seed (the card id), giving each soul its own
+; face. (The resource-meter overlay is still engine chrome, not yet a prim.)
 <card>
   ::human>
     :data>
@@ -12,12 +14,17 @@
         1 &aspect.inventory set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #a8e0e6 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::soul_white &objects.0 set
+        $asset::soul_white &pack set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::human_builder>
     :data>
@@ -29,12 +36,17 @@
         1 &aspect.inventory set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #a8e0e6 &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::soul_white &objects.0 set
+        $asset::soul_white &pack set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
 
   ::player_soul>
     :data>
@@ -44,9 +56,14 @@
         1 &aspect.inventory set
     :visuals>
       @define>
-        $shape.rect &shape set
+        $shape.generic &shape set
         #4455AA &color.bg set
         #ecd6aa &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::soul &objects.0 set
+        $asset::soul &pack set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop

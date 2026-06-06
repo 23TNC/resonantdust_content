@@ -15,26 +15,29 @@
     @define>
       $manifest::conifer &object set
       256 &size set
-      80 100 &scale range
-      50 75 &anchor vec2
+      80 90 &scale range
+      50 100 &anchor vec2          ; bottom-centre: base plants on the slot, canopy spills up
 
   ::stone>
     @define>
       $manifest::stone &object set
       128 &size set
       50 80 &scale range
+      50 50 &anchor vec2
 
   ::berry>
     @define>
       $manifest::berry &object set
       128 &size set
-      50 60 &scale range
+      40 50 &scale range
+      50 50 &anchor vec2
 
   ::flora>
     @define>
       $manifest::flora &object set
       128 &size set
-      50 70 &scale range
+      50 60 &scale range
+      50 50 &anchor vec2
 
   ::soul>
     @define>

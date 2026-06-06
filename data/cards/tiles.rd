@@ -7,13 +7,12 @@
 ; :norm normalizes each from its biome axis. Folding keeps one representative
 ; style per terrain (per-tier tints are lost — accepted).
 ;
-; ring_objects renders stock counts as objects, pulling each aspect's sprite from
-; the <aspect> registry (`art`) — so a card just stocks aspects; no per-card asset
-; list. It iterates every aspect; ones with no `art` (type/cost, or resources
-; without a pack) yield 0 textures and are skipped, so aspect order is irrelevant.
-;
-; Buildings are not folded — each is a distinct placeable with its own object.
-; &texture holds a ground-texture asset (concrete), parallel to &shape/&color.
+; Rendering (all generic `&prims`): terrain tiles call $functions::ring_prims —
+; a hex body + a sprite per stock object, art pulled from the <aspect> registry
+; (`*rec.art`). Buildings call $functions::tile_object (hex body + one placeable
+; from &pack). empty/concrete are body-only (ring_prims with no stock). Ground
+; textures (concrete/alter/fountains/table) are deferred — solid colour for now
+; (needs a hex-clipped textured fill).
 
 <card>
   ::empty>
@@ -24,10 +23,15 @@
         10 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #0b1426 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::ring_prims call drop
+      @update>
+        $functions::ring_prims call drop
+      @destroy>
+        $functions::ring_prims call drop
 
   ::concrete>
     :data>
@@ -37,11 +41,17 @@
         10 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #9b9a96 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        $asset::concrete &texture set
+        ; ground texture deferred — solid colour for now (needs a hex-clipped
+        ; textured fill).
+      @init>
+        $functions::ring_prims call drop
+      @update>
+        $functions::ring_prims call drop
+      @destroy>
+        $functions::ring_prims call drop
 
   ::forest>
     :data>
@@ -104,6 +114,8 @@
         $functions::ring_prims call drop
       @update>
         $functions::ring_prims call drop
+      @destroy>
+        $functions::ring_prims call drop
 
   ::plains>
     :data>
@@ -142,12 +154,15 @@
         &aspect.berry *biome.humidity normalize
     :visuals>
       @define>
-        $shape.hex &shape set
         #C9D75F &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::ring_prims call drop
       @update>
-        $functions::ring_objects call drop
+        $functions::ring_prims call drop
+      @destroy>
+        $functions::ring_prims call drop
 
   ::desert>
     :data>
@@ -191,12 +206,15 @@
         &aspect.fuel *biome.temperature normalize
     :visuals>
       @define>
-        $shape.hex &shape set
         #D4A464 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::ring_prims call drop
       @update>
-        $functions::ring_objects call drop
+        $functions::ring_prims call drop
+      @destroy>
+        $functions::ring_prims call drop
 
   ::mountain>
     :data>
@@ -238,12 +256,15 @@
         &aspect.metal *biome.elevation normalize
     :visuals>
       @define>
-        $shape.hex &shape set
         #6B6859 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
+      @init>
+        $functions::ring_prims call drop
       @update>
-        $functions::ring_objects call drop
+        $functions::ring_prims call drop
+      @destroy>
+        $functions::ring_prims call drop
 
   ::building_nd_furnace>
     :data>
@@ -254,12 +275,16 @@
         50 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #799E50 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::nd_furnace &objects.0 set
+        $asset::nd_furnace &pack set
+      @init>
+        $functions::tile_object call drop
+      @update>
+        $functions::tile_object call drop
+      @destroy>
+        $functions::tile_object call drop
 
   ::building_workbench>
     :data>
@@ -270,12 +295,16 @@
         50 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #799E50 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        1 &objects array
-        $asset::workbench &objects.0 set
+        $asset::workbench &pack set
+      @init>
+        $functions::tile_object call drop
+      @update>
+        $functions::tile_object call drop
+      @destroy>
+        $functions::tile_object call drop
 
   ::alter>
     :data>
@@ -286,13 +315,16 @@
         50 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #C0A060 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        $asset::concrete &texture set
-        1 &objects array
-        $asset::alter &objects.0 set   ; frame from *aspect.level (was indexFromAspect)
+        $asset::alter &pack set        ; ground texture deferred (solid colour)
+      @init>
+        $functions::tile_object call drop
+      @update>
+        $functions::tile_object call drop
+      @destroy>
+        $functions::tile_object call drop
 
   ::anima_fountain>
     :data>
@@ -303,13 +335,17 @@
         50 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #FFD966 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        $asset::concrete &texture set
-        1 &objects array
-        $asset::fountain:anima &objects.0 set
+        $asset::fountain &pack set
+        anima &variant set
+      @init>
+        $functions::tile_object call drop
+      @update>
+        $functions::tile_object call drop
+      @destroy>
+        $functions::tile_object call drop
 
   ::aether_fountain>
     :data>
@@ -320,13 +356,17 @@
         50 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #7D96E3 &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        $asset::concrete &texture set
-        1 &objects array
-        $asset::fountain:aether &objects.0 set
+        $asset::fountain &pack set
+        aether &variant set
+      @init>
+        $functions::tile_object call drop
+      @update>
+        $functions::tile_object call drop
+      @destroy>
+        $functions::tile_object call drop
 
   ::table>
     :data>
@@ -336,10 +376,13 @@
         30 &aspect.cost set
     :visuals>
       @define>
-        $shape.hex &shape set
         #8B5E3C &color.bg set
         #0b1426 &color.title set
         #0b1426 &color.text set
-        $asset::concrete &texture set
-        1 &objects array
-        $asset::table_slab &objects.0 set
+        $asset::table_slab &pack set   ; ground texture deferred (solid colour)
+      @init>
+        $functions::tile_object call drop
+      @update>
+        $functions::tile_object call drop
+      @destroy>
+        $functions::tile_object call drop
