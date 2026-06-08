@@ -21,6 +21,17 @@
       &slot.1.0 destroy
       &slot.1.1 destroy
 
+  ::corpus_dust>
+    @input>
+      $card::corpus *root.def_id eq if &root use
+      $card::dust *slot.1.0.def_id eq if &slot.1.0 claim
+    
+    @output>
+      10 &sys.duration set
+      ltr &slot.1.0.style set
+      &root destroy
+      $card::corpus_dim &root.owner.inventory create
+
   ::corpus_b_top>
     @input>
       $card::corpus *slot.1.0.def_id eq if &slot.1.0 use
@@ -117,3 +128,15 @@
 
       rtl &root.style set
       &root destroy
+
+  ; Stock read/write validation: a ROOT-ONLY recipe (operates on the root card,
+  ; not a stack slot). While the tally's progress (per-card stock) is below 3,
+  ; increment it. Reads `*root.aspect.progress` (decoded from the card's stock
+  ; u32) and writes it back via `inc` (→ Effect::Stock → SetCardStock).
+  ; Self-terminating at 3.
+  ::prime>
+    @input>
+      $card::tally *root.def_id eq *root.aspect.progress 3 lt and if &root use
+
+    @output>
+      &root.aspect.progress inc

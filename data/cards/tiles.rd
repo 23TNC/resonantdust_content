@@ -15,23 +15,19 @@
 ; (needs a hex-clipped textured fill).
 
 <card>
+  ::inventory>
+    :data>
+      @define>
+        tile &aspect.type set
+        1 &aspect.stack_joins set
+        10 &aspect.cost set
+
   ::empty>
     :data>
       @define>
         tile &aspect.type set
         1 &aspect.stack_joins set
         10 &aspect.cost set
-    :visuals>
-      @define>
-        #0b1426 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-      @init>
-        $functions::ring_prims call drop
-      @update>
-        $functions::ring_prims call drop
-      @destroy>
-        $functions::ring_prims call drop
 
   ::concrete>
     :data>
@@ -39,19 +35,6 @@
         tile &aspect.type set
         1 &aspect.stack_joins set
         10 &aspect.cost set
-    :visuals>
-      @define>
-        #9b9a96 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        ; ground texture deferred — solid colour for now (needs a hex-clipped
-        ; textured fill).
-      @init>
-        $functions::ring_prims call drop
-      @update>
-        $functions::ring_prims call drop
-      @destroy>
-        $functions::ring_prims call drop
 
   ::forest>
     :data>
@@ -105,17 +88,6 @@
         &aspect.pine  *biome.humidity 55 75 *seed scatter
         0 1 &aspect.flora range
         &aspect.flora *biome.humidity 50 80 *seed 7 add scatter
-    :visuals>
-      @define>
-        #395C39 &color.bg set
-        #2A2A2A &color.title set
-        #0B1426 &color.text set
-      @init>
-        $functions::ring_prims call drop
-      @update>
-        $functions::ring_prims call drop
-      @destroy>
-        $functions::ring_prims call drop
 
   ::plains>
     :data>
@@ -152,17 +124,6 @@
         :norm>
         &aspect.flora *biome.humidity normalize
         &aspect.berry *biome.humidity normalize
-    :visuals>
-      @define>
-        #C9D75F &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-      @init>
-        $functions::ring_prims call drop
-      @update>
-        $functions::ring_prims call drop
-      @destroy>
-        $functions::ring_prims call drop
 
   ::desert>
     :data>
@@ -204,17 +165,6 @@
         &aspect.water *biome.humidity normalize
         &aspect.food *biome.humidity normalize
         &aspect.fuel *biome.temperature normalize
-    :visuals>
-      @define>
-        #D4A464 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-      @init>
-        $functions::ring_prims call drop
-      @update>
-        $functions::ring_prims call drop
-      @destroy>
-        $functions::ring_prims call drop
 
   ::mountain>
     :data>
@@ -254,17 +204,6 @@
         &aspect.stone *biome.elevation normalize
         &aspect.flora *biome.humidity normalize
         &aspect.metal *biome.elevation normalize
-    :visuals>
-      @define>
-        #6B6859 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-      @init>
-        $functions::ring_prims call drop
-      @update>
-        $functions::ring_prims call drop
-      @destroy>
-        $functions::ring_prims call drop
 
   ::building_nd_furnace>
     :data>
@@ -273,18 +212,6 @@
         1 &aspect.stack_joins set
         2 &aspect.fire stock
         50 &aspect.cost set
-    :visuals>
-      @define>
-        #799E50 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        $asset::nd_furnace &pack set
-      @init>
-        $functions::tile_object call drop
-      @update>
-        $functions::tile_object call drop
-      @destroy>
-        $functions::tile_object call drop
 
   ::building_workbench>
     :data>
@@ -293,18 +220,6 @@
         1 &aspect.stack_joins set
         2 &aspect.fire stock
         50 &aspect.cost set
-    :visuals>
-      @define>
-        #799E50 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        $asset::workbench &pack set
-      @init>
-        $functions::tile_object call drop
-      @update>
-        $functions::tile_object call drop
-      @destroy>
-        $functions::tile_object call drop
 
   ::alter>
     :data>
@@ -313,18 +228,6 @@
         1 &aspect.stack_joins set
         1 &aspect.level set
         50 &aspect.cost set
-    :visuals>
-      @define>
-        #C0A060 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        $asset::alter &pack set        ; ground texture deferred (solid colour)
-      @init>
-        $functions::tile_object call drop
-      @update>
-        $functions::tile_object call drop
-      @destroy>
-        $functions::tile_object call drop
 
   ::anima_fountain>
     :data>
@@ -333,19 +236,6 @@
         1 &aspect.stack_joins set
         1 &aspect.anima set
         50 &aspect.cost set
-    :visuals>
-      @define>
-        #FFD966 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        $asset::fountain &pack set
-        anima &variant set
-      @init>
-        $functions::tile_object call drop
-      @update>
-        $functions::tile_object call drop
-      @destroy>
-        $functions::tile_object call drop
 
   ::aether_fountain>
     :data>
@@ -354,19 +244,6 @@
         1 &aspect.stack_joins set
         1 &aspect.aether set
         50 &aspect.cost set
-    :visuals>
-      @define>
-        #7D96E3 &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        $asset::fountain &pack set
-        aether &variant set
-      @init>
-        $functions::tile_object call drop
-      @update>
-        $functions::tile_object call drop
-      @destroy>
-        $functions::tile_object call drop
 
   ::table>
     :data>
@@ -374,15 +251,3 @@
         tile &aspect.type set
         1 &aspect.stack_joins set
         30 &aspect.cost set
-    :visuals>
-      @define>
-        #8B5E3C &color.bg set
-        #0b1426 &color.title set
-        #0b1426 &color.text set
-        $asset::table_slab &pack set   ; ground texture deferred (solid colour)
-      @init>
-        $functions::tile_object call drop
-      @update>
-        $functions::tile_object call drop
-      @destroy>
-        $functions::tile_object call drop

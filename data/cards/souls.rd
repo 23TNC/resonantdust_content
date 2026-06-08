@@ -12,19 +12,10 @@
         1 &aspect.builder set
         12 &aspect.speed set
         1 &aspect.inventory set
-    :visuals>
-      @define>
-        $shape.generic &shape set
-        #a8e0e6 &color.bg set
-        #ecd6aa &color.title set
-        #0b1426 &color.text set
-        $asset::soul_white &pack set
-      @init>
-        $functions::rect_card call drop
-      @update>
-        $functions::rect_card call drop
-      @destroy>
-        $functions::rect_card call drop
+        2 &aspect.anchor_active set
+        6 &aspect.anchor_hot set
+        12 &aspect.anchor_warm set
+        20 &aspect.anchor_cold set
 
   ::human_builder>
     :data>
@@ -34,36 +25,19 @@
         1 &aspect.builder set
         10 &aspect.speed set
         1 &aspect.inventory set
-    :visuals>
-      @define>
-        $shape.generic &shape set
-        #a8e0e6 &color.bg set
-        #ecd6aa &color.title set
-        #0b1426 &color.text set
-        $asset::soul_white &pack set
-      @init>
-        $functions::rect_card call drop
-      @update>
-        $functions::rect_card call drop
-      @destroy>
-        $functions::rect_card call drop
+        2 &aspect.anchor_active set
+        6 &aspect.anchor_hot set
+        12 &aspect.anchor_warm set
+        20 &aspect.anchor_cold set
 
   ::player_soul>
     :data>
       @define>
         soul &aspect.type set
+        ; Pin the def_id to the top of the soul type → packed_definition 0xFFFF
+        ; (reserved player-soul range 0xFFF0..=0xFFFF). The player_soul is then
+        ; identified by definition alone — no `player_owned` flag — and the roster
+        ; subscription filters `packed_definition >= 0xFFF0`.
+        4095 &aspect.def_id set
         1 &aspect.soul set
         1 &aspect.inventory set
-    :visuals>
-      @define>
-        $shape.generic &shape set
-        #4455AA &color.bg set
-        #ecd6aa &color.title set
-        #0b1426 &color.text set
-        $asset::soul &pack set
-      @init>
-        $functions::rect_card call drop
-      @update>
-        $functions::rect_card call drop
-      @destroy>
-        $functions::rect_card call drop

@@ -27,11 +27,31 @@
     @define>
       3 &value set
 
+  ; inventory rect cell — the slot a content card snaps into. A content card is
+  ; body-centred on the snap point, but its full face is card_width × card_height
+  ; (the 72 body PLUS the 24 title strip ABOVE it), so its visual centre sits half
+  ; a title above the snap. The slot must surround that full face, not just the
+  ; body — so the cell is the card face plus `cell_margin` on EVERY side, and the
+  ; slot tile is shifted up half a title (see `rect_tile`) to re-centre on the
+  ; face. cell_width/height are also the snap spacing (set client-side in
+  ; `GridInventory`: GRID_W/GRID_H = CARD_* + 2·margin), so slots meet edge-to-edge
+  ; with `cell_margin` visible uniformly around each card. Keep `cell_margin` in
+  ; sync with `GridInventory`'s GRID_MARGIN.
+  ::cell_margin>
+    @define>
+      8 &value set
+  ::cell_width>
+    @define>
+      $globals::card_width $globals::cell_margin 2 mul add &value set
+  ::cell_height>
+    @define>
+      $globals::card_height $globals::cell_margin 2 mul add &value set
+
   ; world hex cell — pointy-top, derived from the display radius. width = √3·r,
   ; height = 2·r (matches the client HexGrid). The tile body fills these px.
   ::hex_radius>
     @define>
-      96 &value set
+      98 &value set
   ::hex_width>
     @define>
       $globals::hex_radius 3 sqrt mul &value set
@@ -146,6 +166,26 @@
       &var.2 inc
       :aspect goto
 
+  ; rect_tile — the inventory slot background: a rect filling the cell (cell_width
+  ; × cell_height, tint *color.bg). The rect-grid analogue of `ring_prims`' hex
+  ; body, but for a slot — no stock scatter, no title bar. Sized to the full cell
+  ; (not card_width × body_height like `rect_card`) so adjacent slots meet
+  ; edge-to-edge.
+  ;
+  ; Y SHIFT: a content card is BODY-centred on the snap (= cell centre), with its
+  ; title strip hanging half-a-card above — so its full face is centred half a
+  ; title ABOVE the snap. The tile box corner sits at the cell corner, so a plain
+  ; pos (0,0) would centre the slot on the snap and leave it sitting ~title/2 low
+  ; under the card. Shift the rect UP by title_height/2 so the slot re-centres on
+  ; the card's FACE, giving an equal `cell_margin` above the title and below the
+  ; body. (x stays 0 — the face is already horizontally centred on the snap.)
+  ::rect_tile>
+    0 $globals::title_height 2 div sub &var.0 set            ; -title_height/2
+    ^rect call &h set
+    0.0 *var.0 &h.pos vec2
+    $globals::cell_width $globals::cell_height &h.size vec2
+    *color.bg &h.tint set
+
   ; stack_layout — read `^card_data` and set the layout vars every card builder
   ; uses, so the stack math lives in ONE place. The body is drawn top-left at
   ; (0, *stack_dy), height card_height; the TITLE BAR is a separate title_height
@@ -251,6 +291,24 @@
     50.0 50.0 &h.anchor vec2
 
     $functions::title call drop                             ; title bar strip (bg + progress + text)
+
+  ; card_death — the shared death exit: append a roll-up MASK over the whole card.
+  ; Add it AFTER the card's normal draw in `:visuals @destroy` so the card keeps
+  ; rendering while it rolls, e.g.
+  ;   @destroy> $functions::rect_card call drop  $functions::card_death call drop
+  ; The `^mask` prim CLIPS the rest of the card's prims (the client sets it as the
+  ; layer mask); easing its height full → 0, top-anchored, rolls the card up
+  ; bottom→top. When the ease settles the client finalizes the death (dead=2).
+  ; Mask is a CARD (self-mounted) feature — don't add to tiles (they render into
+  ; the shared world sort layer, which has no per-tile container to clip).
+  ::card_death>
+    $functions::stack_layout call drop                     ; (re)establish *stack_dy
+    ^mask call &m set
+    ; top-left at the title strip's top (rides the stack fan); full card width.
+    0   *stack_dy $globals::title_height sub   &m.pos vec2
+    ; TARGET = zero height (rolled away); START (enter) = full card height.
+    $globals::card_width   0   &m.size vec2
+    $globals::card_height &m.enter.h set
 
   ; tile_object — a hex tile with ONE explicit object (a building), no stock ring.
   ; Hex body (tint *color.bg) + a single centred sprite from the card's &pack

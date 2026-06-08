@@ -197,6 +197,20 @@
   ::type>
     @define>
       traits &section set
+  ; `def_id` optionally PINS a card's per-type def id (the low 12 bits of its
+  ; packed_definition) instead of letting the loader auto-increment — e.g. the
+  ; player_soul sets it to 4095 (0xFFF) so its packed def is 0xFFFF. Loader-read
+  ; only (like `type`); never summed. Declared here to pass the aspect-member lint.
+  ::def_id>
+    @define>
+      traits &section set
+  ; `progress` is a per-card stock counter (build/charge progress, 0..N). Backed
+  ; by a card's `stock` u32 (declared `<bits> &aspect.progress stock`), read +
+  ; written by recipes (`*root.aspect.progress`, `&root.aspect.progress inc`). A
+  ; magnitude, but sim-only — not displayed.
+  ::progress>
+    @define>
+      traits &section set
   ; Stacking bit-fields (bit i = stack i: 0 hex/under, 1 top, 2 bottom).
   ; stack_hosts = stacks this card sources as root; stack_joins = stacks it can
   ; occupy. Absent => client default (regular card: hosts 0b111, joins 0b110).
@@ -246,5 +260,22 @@
     @define>
       traits &section set
   ::cluster_strength>
+    @define>
+      traits &section set
+  ; Anchor reach: per-tier tile radii a card projects to drive the client's zone
+  ; subscription/memory tiers (active > hot > warm > cold). A card with these
+  ; (typically a soul) makes the zones within each radius active/hot/warm/cold;
+  ; cards subscribe within anchor_hot, zones within anchor_cold. Client-only —
+  ; the shard/gate never read these. Distances are in tiles.
+  ::anchor_active>
+    @define>
+      traits &section set
+  ::anchor_hot>
+    @define>
+      traits &section set
+  ::anchor_warm>
+    @define>
+      traits &section set
+  ::anchor_cold>
     @define>
       traits &section set

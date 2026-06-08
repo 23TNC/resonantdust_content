@@ -30,14 +30,14 @@
       $manifest::berry &object set
       128 &size set
       40 50 &scale range
-      50 50 &anchor vec2
+      50 60 &anchor vec2
 
   ::flora>
     @define>
       $manifest::flora &object set
       128 &size set
       50 60 &scale range
-      50 50 &anchor vec2
+      50 60 &anchor vec2
 
   ::soul>
     @define>

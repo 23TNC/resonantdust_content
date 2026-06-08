@@ -5,9 +5,9 @@
 > — cards, recipes, aspects, functions, assets, manifests, biomes — specified in
 > [`data/SYNTAX.txt`](data/SYNTAX.txt) (sigils + ops) and
 > [`data/CONVENTIONS.txt`](data/CONVENTIONS.txt) (slot / aspect / chain model).
-> It is interpreted by the **shared VM** in [`../wasm/`](../wasm/AGENTS.md) and
+> It is interpreted by the **shared VM** in [`../shared/`](../shared/AGENTS.md) and
 > **loaded at runtime** — changing content needs no recompile. Validate the whole
-> corpus with `bin/wasm corpus`.
+> corpus with `bin/shared corpus`.
 >
 > **Everything below this line documents the LEGACY system** — the JSON catalogs
 > and the `resonantdust-content` crate (`include_str!`-embedded, with recipe
