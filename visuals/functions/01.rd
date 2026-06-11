@@ -47,11 +47,14 @@
     @define>
       $globals::card_height $globals::cell_margin 2 mul add &value set
 
-  ; world hex cell — pointy-top, derived from the display radius. width = √3·r,
-  ; height = 2·r (matches the client HexGrid). The tile body fills these px.
+  ; world hex cell — pointy-top, derived from the CARD so cards intersect the
+  ; hexagon (not float in an oversized one). The hex inscribes a card-sized rect
+  ; (card_width wide × card_width + 2·title_height tall = 72×120); for a pointy-
+  ; top hex inscribing W×H (H>R), R = W/(2√3) + H/2 ≈ 80.78. width = √3·r,
+  ; height = 2·r (matches the client WORLD_HEX_RADIUS in hexSize.ts — keep synced).
   ::hex_radius>
     @define>
-      98 &value set
+      $globals::card_width 2 3 sqrt mul div $globals::card_width $globals::title_height 2 mul add 2 div add &value set
   ::hex_width>
     @define>
       $globals::hex_radius 3 sqrt mul &value set
@@ -72,6 +75,18 @@
 ; functions version like cards ($functions::ring_prims → lineage head).
 <functions>
 
+  ; hex_body — the bare hex tile body prim (prims.0): a ^hex filling the cell
+  ; (hex_width × hex_height px), tint *color.bg. Extracted so every hex surface
+  ; (ring_prims, tile_object, the forest_cards experiment) makes its hexagon ONE
+  ; way. `^hex` is "the thing that gives us a hexagon"; this names + sizes it. The
+  ; handle is left in `&h` for the caller, but callers that re-use `&h` just
+  ; overwrite it — push order is paint order, so the body stays prims.0.
+  ::hex_body>
+    ^hex call &h set
+    0.0 0.0 &h.pos vec2
+    $globals::hex_width $globals::hex_height &h.size vec2   ; body fills the cell (px)
+    *color.bg &h.tint set
+
   ; ring_prims — a tile's stock scatter: prims.0 = the hex tile body (fills the
   ; cell, tint color.bg), then one sprite prim per stock object dropped into one
   ; of 7 precomputed slots (centre + a jittered 6-point ring) at random. The
@@ -80,13 +95,10 @@
   ; each object is sized by the asset's `scale` envelope. Object counter var.0
   ; (0..6); `^seed` (the tile's (q,r) hash) drives the scatter.
   ::ring_prims>
-    ; ^hex constructs the tile body prim engine-side and returns a handle (&h);
-    ; we configure it through the handle. Each ^sprite likewise pushes a prim and
-    ; hands back &h — push order IS paint order, so no index bookkeeping.
-    ^hex call &h set
-    0.0 0.0 &h.pos vec2
-    $globals::hex_width $globals::hex_height &h.size vec2   ; body fills the cell (px)
-    *color.bg &h.tint set
+    ; the hex tile body (prims.0) — the shared hexagon builder. Each ^sprite below
+    ; likewise pushes a prim and hands back &h — push order IS paint order, so no
+    ; index bookkeeping.
+    $functions::hex_body call drop
 
     ; ring geometry in PX, derived from the cell globals (constant per tile):
     ; centre = cell/2, radii ~28%/25% of the cell width/height. var.4/5 = centre,
@@ -226,13 +238,14 @@
     ^rect call &h set                                        ; bar background
     ; extend 1px each side (like the body) so the two fills overlap at the seam —
     ; closes the residual ~1px transparent line between the title bar and body.
-    0.0   *band_y 1 sub   &h.pos vec2
+    ; x rides *card_ox (0 for a normal card; a tile offsets the card in its cell).
+    *card_ox   *band_y 1 sub   &h.pos vec2
     $globals::card_width   $globals::title_height 2 add   &h.size vec2
     *color.title &h.tint set
 
     ^card_data call &d set                                   ; progress fill (behind the text)
     ^progress call &p set
-    0.0 *band_y &p.pos vec2
+    *card_ox *band_y &p.pos vec2
     $globals::card_width $globals::title_height &p.size vec2
     #6cf &p.tint set
     *d.progress.0.id &p.target set
@@ -240,7 +253,7 @@
 
     ^text call &h set                                        ; title text, on top
     *sys.label &h.text set
-    $globals::card_width 2 div   *band_y $globals::title_height 2 div add   &h.pos vec2
+    *card_ox $globals::card_width 2 div add   *band_y $globals::title_height 2 div add   &h.pos vec2
     $globals::card_width   $globals::title_height 70 mul 100 div   &h.size vec2
     50.0 50.0 &h.anchor vec2
     *color.text &h.tint set
@@ -250,7 +263,7 @@
     ; debounce fraction, NOT a recipe row). Engine self-hides it when no queue.
     ^progress call &q set
     1 &q.source set
-    0.0 *queue_y &q.pos vec2
+    *card_ox *queue_y &q.pos vec2
     $globals::card_width $globals::queue_height &q.size vec2
     #ffffff &q.tint set
     1 &q.style set
@@ -266,12 +279,22 @@
   ; on `*band_y` (which already includes the fan).
   ::rect_card>
     $functions::stack_layout call drop
+    $functions::card_face call drop
 
+  ; card_face — draws a standard card FACE (body + centred art + title strip) at
+  ; the current layout vars: `*stack_dy` (the fan y, set by stack_layout or a
+  ; caller), `*band_y`/`*queue_y` (the title strip), and `*card_ox` — an X ORIGIN
+  ; that DEFAULTS TO 0 (unset → 0), so a normal card draws card-local (origin 0)
+  ; exactly as before, while a tile sets `*card_ox` to place the card WITHIN its
+  ; cell. Reads *color.* / *pack / *sys.label from the store, so any surface that
+  ; populates those + the layout vars draws an identical card face. The
+  ; forest_cards experiment reuses this instead of re-rolling its own rects.
+  ::card_face>
     ^rect call &h set                                        ; body fill (the 72×72 square)
     ; extend the body 1px on each side so it underlaps the title bar — adjacent
     ; sprites leave a ~1px transparent seam (edge AA / atlas half-texel) otherwise.
     ; The title (higher z) covers the overlap; centre is unchanged.
-    0.0   *stack_dy 1 sub   &h.pos vec2
+    *card_ox   *stack_dy 1 sub   &h.pos vec2
     $globals::card_width   $globals::body_height 2 add   &h.size vec2
     *color.bg &h.tint set
 
@@ -285,7 +308,7 @@
     ; a single-sprite pack (souls, soul_offline) leaves index unset → the client
     ; picks by seed (the card id), so e.g. each soul gets its own portrait.
     *pack.texture count 0 gt if *pack.texture.*variant &h.index set
-    $globals::card_width 2 div   *stack_dy $globals::body_height 2 div add   &h.pos vec2
+    *card_ox $globals::card_width 2 div add   *stack_dy $globals::body_height 2 div add   &h.pos vec2
     $globals::card_width 85 mul 100 div &var.0 set          ; square art ≈85% of card width
     *var.0 *var.0 &h.size vec2
     50.0 50.0 &h.anchor vec2
@@ -315,10 +338,7 @@
   ; (+ &variant for a variant pack), sized to the asset's native px. For tiles
   ; whose art is a fixed placeable, not aspect-stock scatter (cf. ring_prims).
   ::tile_object>
-    ^hex call &h set
-    0.0 0.0 &h.pos vec2
-    $globals::hex_width $globals::hex_height &h.size vec2
-    *color.bg &h.tint set
+    $functions::hex_body call drop
 
     ^sprite call &h set
     *pack.object &h.texture set

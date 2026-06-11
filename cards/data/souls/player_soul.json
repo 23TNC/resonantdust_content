@@ -1,9 +1,0 @@
-{
-  "soul": {
-    "player_soul": {
-      "style": [ "#4455AA", "#ecd6aa", "#0b1426" ],
-      "object": { "name": "soul" },
-      "aspects": { "soul": 1, "inventory": 1 }
-    }
-  }
-}

@@ -11,6 +11,9 @@
         requisite &aspect.type set
         2 &aspect.fuel set
         2 &aspect.wood set
+        12 &aspect.stack_hosts set
+        6 &aspect.stack_joins set
+
 
   ::stick>
     :data>
@@ -29,6 +32,17 @@
       @define>
         requisite &aspect.type set
         1 &aspect.aether set
+
+  ; Stacking-resolver test card: hosts NO stacks (0b0000), joins top+bottom
+  ; (0b1100=12). Used by the harness stack tests — a leaf that caps a stack and
+  ; forces drop-inversion (drop log onto test_dust → test_dust re-roots onto log).
+  ::test_dust>
+    :data>
+      @define>
+        requisite &aspect.type set
+        1 &aspect.aether set
+        0 &aspect.stack_hosts set
+        12 &aspect.stack_joins set
 
   ::food>
     :data>

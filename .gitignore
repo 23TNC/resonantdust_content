@@ -69,3 +69,7 @@ Thumbs.db
 
 # npm
 pixijs/node_modules/*
+
+# Runtime-authored content (add_content / modify_content) — gate-written,
+# not hand-authored base. Durable per-deploy; not tracked.
+data/runtime/

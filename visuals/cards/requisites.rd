@@ -67,6 +67,22 @@
         $functions::rect_card call drop
       @destroy>
         $functions::rect_card call drop
+
+  ::test_dust>
+    :visuals>
+      @define>
+        $shape.generic &shape set
+        #ffb333 &color.bg set
+        #ecd6aa &color.title set
+        #0b1426 &color.text set
+        $asset::requisite &pack set
+        dust &variant set
+      @init>
+        $functions::rect_card call drop
+      @update>
+        $functions::rect_card call drop
+      @destroy>
+        $functions::rect_card call drop
         $functions::card_death call drop
 
   ::food>

@@ -1,5 +1,0 @@
-{
-  "_comment": "Server bootstrap seed data. Zones are generated directly by the bootstrap reducer; only cards are read from here.",
-
-  "card": [ "corpus", "corpus", "corpus", "despair", "dread" ]
-}

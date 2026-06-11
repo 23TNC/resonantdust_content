@@ -5,16 +5,14 @@
     :visuals>
       @define>
         #0b1426 &color.bg set
-      ; the inventory SLOT background — a full-cell rect (cell_width × cell_height)
-      ; so slots tile edge-to-edge with no gap and the content card snaps centred
-      ; inside. Uses rect_tile, NOT rect_card: a slot has no title bar and must be
-      ; cell-sized, not card-sized.
+        #0b1426 &color.title set
+        #0b1426 &color.text set
       @init>
-        $functions::rect_tile call drop
+        $functions::ring_prims call drop
       @update>
-        $functions::rect_tile call drop
+        $functions::ring_prims call drop
       @destroy>
-        $functions::rect_tile call drop
+        $functions::ring_prims call drop
 
   ::empty>
     :visuals>

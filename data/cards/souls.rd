@@ -10,8 +10,8 @@
         soul &aspect.type set
         2 &aspect.soul set
         1 &aspect.builder set
-        12 &aspect.speed set
-        1 &aspect.inventory set
+        12 &aspect.move_speed set
+        4 &aspect.inventory set
         2 &aspect.anchor_active set
         6 &aspect.anchor_hot set
         12 &aspect.anchor_warm set
@@ -23,7 +23,7 @@
         soul &aspect.type set
         2 &aspect.soul set
         1 &aspect.builder set
-        10 &aspect.speed set
+        10 &aspect.move_speed set
         1 &aspect.inventory set
         2 &aspect.anchor_active set
         6 &aspect.anchor_hot set

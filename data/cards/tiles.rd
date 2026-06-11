@@ -19,21 +19,21 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         10 &aspect.cost set
 
   ::empty>
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         10 &aspect.cost set
 
   ::concrete>
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         10 &aspect.cost set
 
   ::forest>
@@ -46,46 +46,50 @@
         2    &aspect.pine stock
         2    &aspect.flora stock
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         30   &aspect.cost set
       @init>
-        ; stock = scatter (band-relative count + ±1 jitter), NOT normalize.
-        ; normalize mapped the absolute 0..100 axis into the range, so a narrow
-        ; climate band floored every tile to one bucket (forests were all
-        ; pine=2). scatter maps `input` from the band [lo,hi] onto the range,
-        ; rounds, and jitters by ^seed — so neighbours differ but wetter ground
-        ; trends denser. Each tier ranges only the aspects it grows; an unranged
-        ; aspect stays 0 (no trees off-band). pine uses *seed, flora *seed+7 so
-        ; their jitter is decorrelated.
+        ; scatter maps `input` from the band [lo,hi] onto the slot range, rounds,
+        ; and jitters ±1 by ^seed. pine uses *seed, flora *seed+7 (decorrelated).
+        ;
+        ; PINE GROVES: pine density follows the fine-scale `cluster` mask (a ~7-cell
+        ; noise channel, finer than any climate axis), scattered 0..max — so a forest
+        ; grows as GROVES (dense cluster centres) fading to CLEARINGS (low cluster →
+        ; 0), not a tree on every tile. The earlier coarse `aether` gate (1/15) made
+        ; ~15-tile all-or-nothing patches — too big; `cluster` (1/7) gives groves a
+        ; few cells across. The rarity tier sets the grove's MAX density; the cluster
+        ; band [lo,hi] shifts the clump/clearing balance (raise `lo` for more
+        ; clearings, widen for softer edges). flora (undergrowth) follows humidity
+        ; UNgated, so clearings keep their grass/leaf cover.
         ^biome call &biome set
         ^seed call &seed set
 
         *biome.rarity 0 10 within !if :r10 goto
           0 1 &aspect.pine  range
-          &aspect.pine  *biome.humidity 65 85 *seed scatter
+          &aspect.pine  *biome.cluster 48 88 *seed scatter
           0 2 &aspect.flora range
           &aspect.flora *biome.humidity 40 85 *seed 7 add scatter
           0 ret
 
         :r10>
         *biome.rarity 10 20 within !if :r20 goto
-          0 3 &aspect.pine  range
-          &aspect.pine  *biome.humidity 75 95 *seed scatter
+          0 2 &aspect.pine  range
+          &aspect.pine  *biome.cluster 48 88 *seed scatter
           0 1 &aspect.flora range
           &aspect.flora *biome.humidity 40 85 *seed 7 add scatter
           0 ret
 
         :r20>
         *biome.rarity 20 30 within !if :def goto
-          0 3 &aspect.pine  range
-          &aspect.pine  *biome.humidity 55 90 *seed scatter
+          0 2 &aspect.pine  range
+          &aspect.pine  *biome.cluster 48 88 *seed scatter
           0 2 &aspect.flora range
           &aspect.flora *biome.humidity 55 80 *seed 7 add scatter
           0 ret
 
         :def>
-        0 3 &aspect.pine  range
-        &aspect.pine  *biome.humidity 55 75 *seed scatter
+        0 2 &aspect.pine  range
+        &aspect.pine  *biome.cluster 48 88 *seed scatter
         0 1 &aspect.flora range
         &aspect.flora *biome.humidity 50 80 *seed 7 add scatter
 
@@ -95,7 +99,7 @@
         2 &aspect.flora stock
         2 &aspect.berry stock
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         5 &aspect.cost set
       @init>
         ^biome call &biome set
@@ -173,7 +177,7 @@
         1 &aspect.flora stock
         2 &aspect.metal stock
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         15 &aspect.cost set
       @init>
         ^biome call &biome set
@@ -209,7 +213,7 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         2 &aspect.fire stock
         50 &aspect.cost set
 
@@ -217,7 +221,7 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         2 &aspect.fire stock
         50 &aspect.cost set
 
@@ -225,7 +229,7 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         1 &aspect.level set
         50 &aspect.cost set
 
@@ -233,7 +237,7 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         1 &aspect.anima set
         50 &aspect.cost set
 
@@ -241,7 +245,7 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         1 &aspect.aether set
         50 &aspect.cost set
 
@@ -249,5 +253,5 @@
     :data>
       @define>
         tile &aspect.type set
-        1 &aspect.stack_joins set
+        2 &aspect.stack_joins set
         30 &aspect.cost set

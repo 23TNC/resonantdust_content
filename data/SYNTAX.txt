@@ -74,10 +74,10 @@ array Initialize a zeroed collection reference with the given slot count.
 destroy Destroy an object.
 create Create an object in a container.
 
-borrow Borrow an object for recipe execution.
-use    Use an object for recipe execution.
-claim  Claim an object for recipe execution.
-share  Share an object for recipe execution.
+borrow Borrow an object for recipe execution. slot hold: false position hold: false
+share  Share an object for recipe execution.  slot hold: false position hold: true
+use    Use an object for recipe execution.    slot hold: true  position hold: false
+claim  Claim an object for recipe execution.  slot hold: true  position hold: true
 
 stock Set a slot's bit width and mark it a variable aspect: <bits> &slot stock. (Value set later via range + normalize; no `set` needed here.) Static aspects need no declaration — just <value> &slot set.
 

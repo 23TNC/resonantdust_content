@@ -1,7 +1,0 @@
-{
-  "human": {
-    "default": {"axe": 1, "corpus": 3},
-    "debug": {"axe": 1, "corpus": 5, "anima": 5, "sollertia": 5, "aether": 5},
-    "blueprints": [ "nd_furnace" ]
-  }
-}
